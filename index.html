@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AI工作台">
+<meta name="theme-color" content="#FF2442">
+<title>宏的AI陪跑 · 视频工作台</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+<link rel="apple-touch-icon" href="assets/icon.svg">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="logo"><span class="dot"></span>宏的AI陪跑 <small>视频工作台</small></div>
+    <nav>
+      <button data-view="board" class="active">工作台</button>
+      <button data-view="hot">热点雷达</button>
+      <button data-view="review">复盘</button>
+      <button data-view="biz">商单</button>
+      <button data-view="rivals">对标博主</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="stat-strip">
+      <div class="s" id="st-fans"></div>
+      <div class="s" id="st-week"></div>
+      <div class="s" id="st-review"></div>
+      <div class="s" id="st-pipe"></div>
+      <div class="s" id="st-biz"></div>
+    </div>
+    <button id="btn-sync" class="sync-btn" title="云端同步设置">☁ 本地</button>
+  </div>
+</header>
+
+<main>
+  <!-- ========== 工作台（主视图） ========== -->
+  <section class="view active" id="view-board">
+    <div class="dash">
+      <div class="card focus">
+        <h3>今日聚焦</h3>
+        <ul id="focus-list"></ul>
+      </div>
+      <div class="card kpi">
+        <div class="lab">粉丝进度（前期核心 KPI）</div>
+        <div class="num" id="kpi-fans">0</div>
+        <div class="bar" id="fans-bar"><i style="width:0%"></i></div>
+        <div class="sub" id="kpi-fans-sub">目标 5000 粉 · 开蒲公英接商单</div>
+      </div>
+      <div class="card kpi">
+        <div class="lab">本周发布节奏</div>
+        <div class="num" id="kpi-week">0<span class="sub-num"> / 3 条</span></div>
+        <div class="week-bars" id="week-bars"></div>
+        <div class="sub" id="kpi-week-sub">近 7 天发布分布 · 目标每周 3 条稳定输出</div>
+      </div>
+    </div>
+
+    <div class="board-head">
+      <div>
+        <h2 style="display:inline">视频生产流水线</h2>
+        <span class="hint">　拖拽卡片推进阶段 · 点卡片编辑</span>
+      </div>
+      <button class="btn" id="btn-new">+ 新建选题</button>
+    </div>
+    <div class="board" id="board"></div>
+  </section>
+
+  <!-- ========== 热点雷达 ========== -->
+  <section class="view" id="view-hot">
+    <h2 class="section-title">热点雷达 <span id="hot-src" class="hot-src" hidden></span></h2>
+    <p class="section-sub">每天 9:00 自动抓取抖音 / 小红书 AI 爆款 · 一键变成你的二创选题（品牌名模糊化，方法论留给你）。</p>
+    <div class="grid hot-grid" id="hot-grid"></div>
+  </section>
+
+  <!-- ========== 复盘 ========== -->
+  <section class="view" id="view-review">
+    <h2 class="section-title">发帖复盘</h2>
+    <p class="section-sub">视频博主看这 4 个数：2秒留存（钩子）、完播率（节奏）、赞藏（价值）、转粉率（人设）。</p>
+    <div class="review-wrap">
+      <form class="form" id="rv-form">
+        <label>选择视频
+          <select id="rv-idea"></select>
+        </label>
+        <div class="script-recall" id="rv-script"></div>
+        <label>播放量<input id="rv-play" type="number" placeholder="如 12000" required></label>
+        <div style="display:flex;gap:10px">
+          <label style="flex:1">2秒留存率(%)<input id="rv-ret2" type="number" placeholder="如 45"></label>
+          <label style="flex:1">完播率(%)<input id="rv-finish" type="number" placeholder="如 18"></label>
+        </div>
+        <div style="display:flex;gap:10px">
+          <label style="flex:1">赞<input id="rv-like" type="number" placeholder="0"></label>
+          <label style="flex:1">藏<input id="rv-save" type="number" placeholder="0"></label>
+        </div>
+        <div style="display:flex;gap:10px">
+          <label style="flex:1">评<input id="rv-comment" type="number" placeholder="0"></label>
+          <label style="flex:1">涨粉<input id="rv-follow" type="number" placeholder="0"></label>
+        </div>
+        <button class="btn" type="submit">保存并诊断</button>
+      </form>
+      <div>
+        <div class="review-list" id="review-list"></div>
+        <div id="ret-chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 商单变现 ========== -->
+  <section class="view" id="view-biz">
+    <h2 class="section-title">商单变现</h2>
+    <p class="section-sub">前期涨粉的出口。追踪蒲公英门槛、接单准备度、最佳作品集与报价参考——把运营工具变成生意工具。</p>
+    <div class="biz-grid">
+      <div class="card biz-card biz-fans">
+        <div class="biz-h">粉丝 &amp; 蒲公英门槛</div>
+        <div class="fans-row">
+          <div class="fans-now"><b id="biz-fans-now">0</b><span>当前粉丝</span></div>
+          <div class="fans-edit">
+            <input id="biz-fans-input" type="number" placeholder="更新粉丝数">
+            <button class="btn ghost" id="biz-fans-save">更新</button>
+          </div>
+        </div>
+        <div class="prog"><i id="biz-prog-i"></i></div>
+        <div class="biz-sub" id="biz-pgy">蒲公英入驻门槛 1000 粉</div>
+      </div>
+
+      <div class="card biz-card biz-ready">
+        <div class="biz-h">接单准备度</div>
+        <ul class="ready" id="biz-ready"></ul>
+      </div>
+
+      <div class="card biz-card biz-port">
+        <div class="biz-h">最佳作品集 <small>自动按转粉率排序</small></div>
+        <div id="biz-port"></div>
+      </div>
+
+      <div class="card biz-card biz-rate">
+        <div class="biz-h">AI 赛道报价参考</div>
+        <table class="rate" id="biz-rate"></table>
+        <div class="biz-note">AI / 科技赛道通常溢价 30–50%，仅供参考</div>
+      </div>
+
+      <div class="card biz-card biz-deals">
+        <div class="biz-h">商单记录</div>
+        <div class="deal-form">
+          <input id="biz-brand" placeholder="品牌">
+          <input id="biz-amount" placeholder="金额 ¥">
+          <select id="biz-status"><option>洽谈中</option><option>已签约</option><option>已结款</option></select>
+          <button class="btn" id="biz-deal-add">添加</button>
+        </div>
+        <div id="biz-deals"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 对标博主 ========== -->
+  <section class="view" id="view-rivals">
+    <h2 class="section-title">对标博主</h2>
+    <p class="section-sub">站外视频无法直接内嵌，做成拆解卡 + 一键跳转。学他们的「钩子 / 节奏 / 栏目化」，不抄内容抄打法。</p>
+    <div class="grid rival-grid" id="rival-grid"></div>
+  </section>
+</main>
+
+<!-- ========== 新建 / 编辑 弹窗 ========== -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h3>视频选题</h3>
+    <div class="fld"><label>标题（工作标题）</label><input id="m-title" placeholder="如：我用AI把3小时PPT压到3分钟"></div>
+    <div class="fld"><label>前3秒钩子（视频命门 · 即开场）</label><input id="m-hook" placeholder="如：以前做PPT熬到凌晨，现在喝杯咖啡就搞定"></div>
+    <div class="script-block">
+      <div class="sb-head"><b>完整脚本</b><span class="sb-sub">开场钩子即上方，下面补 3 块 · 自动合规预检</span></div>
+      <div class="fld"><label>痛点共鸣（为什么看下去）</label><textarea id="m-pain" placeholder="如：你是不是也每次做PPT都熬到半夜、改到崩溃……"></textarea></div>
+      <div class="fld"><label>实操步骤（分点写，口播感）</label><textarea id="m-steps" placeholder="如：① 打开XX ② 输入这句提示词 ③ 一键出稿……"></textarea></div>
+      <div class="fld"><label>收尾关注引导</label><textarea id="m-end" placeholder="如：关注我，下期拆解海外博主私藏的AI玩法"></textarea></div>
+      <div class="compliance" id="m-comp"></div>
+    </div>
+    <div class="fld"><label>封面概念</label><input id="m-cover" placeholder="如：熬夜黑眼圈 vs 咖啡+成品"></div>
+    <div style="display:flex;gap:10px">
+      <div class="fld" style="flex:1"><label>标签</label><input id="m-tag" placeholder="AI实操 / AI小白 / 陪跑"></div>
+      <div class="fld" style="flex:1"><label>预计发布</label><input id="m-due" type="date"></div>
+    </div>
+    <div class="fld"><label>阶段</label>
+      <select id="m-stage">
+        <option value="pool">灵感池</option>
+        <option value="script">写脚本</option>
+        <option value="shoot">拍摄</option>
+        <option value="edit">剪辑</option>
+        <option value="published">已发布</option>
+        <option value="review">复盘</option>
+      </select>
+    </div>
+    <div class="fld"><label>发布平台</label>
+      <div class="pf-pick" id="m-pf">
+        <label><input type="checkbox" value="xhs" checked>小红书</label>
+        <label><input type="checkbox" value="dy">抖音</label>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn ghost" id="m-del" style="display:none;color:#FF2442;border-color:#FFD2DA">删除</button>
+      <div class="right">
+        <button class="btn ghost" id="m-cancel">取消</button>
+        <button class="btn" id="m-save">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 云端同步设置 弹窗 ========== -->
+<div class="modal-bg" id="sync-modal">
+  <div class="modal sync-modal">
+    <h3>云端同步设置</h3>
+    <p class="sync-tip">数据存到你的 <b>GitHub Gist</b>：永久免费、不依赖电脑开机、电脑 / iPhone / iPad 三端实时同步。只需一个带 <code>gist</code> 权限的 GitHub 个人访问令牌（PAT），10 秒建好。其它设备用同一个令牌会自动找到这份数据，不用抄 ID。</p>
+    <div class="fld"><label>GitHub 令牌 (PAT)</label><input id="sync-token" type="password" placeholder="github_pat_xxx 或 ghp_xxx（需 gist 权限）" autocomplete="off"></div>
+    <div class="fld" id="gist-row" style="display:none"><label>同步 ID（其它设备自动查找，一般无需手动填）</label><input id="sync-gist" readonly></div>
+    <div class="sync-status off" id="sync-status">状态：未连接（仅本地保存）</div>
+    <details class="sync-adv">
+      <summary>高级：改用 Supabase</summary>
+      <div class="fld"><label>Supabase Project URL</label><input id="sync-url" placeholder="https://xxxx.supabase.co"></div>
+      <div class="fld"><label>Anon / Public Key</label><input id="sync-key" placeholder="eyJ...（以 eyJ 开头）"></div>
+    </details>
+    <div class="modal-acts">
+      <div class="left">
+        <button class="btn ghost" id="sync-export">导出备份</button>
+        <button class="btn ghost" id="sync-import-btn">导入备份</button>
+        <input type="file" id="sync-import" accept="application/json" style="display:none">
+      </div>
+      <div class="right">
+        <button class="btn ghost" id="sync-pull">从云端拉取</button>
+        <button class="btn ghost" id="sync-cancel">取消</button>
+        <button class="btn" id="sync-save">保存并连接</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/data.js"></script>
+<script src="data/hotspots.js"></script>
+<script src="assets/sync.js"></script>
+<script src="assets/app.js"></script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW',e)));}</script>
+</body>
+</html>
