@@ -1,0 +1,8 @@
+{
+  "generatedAt": null,
+  "model": null,
+  "searches": 0,
+  "method": "Claude API 的 web_search 工具，检索公开网络索引内容；不访问平台接口",
+  "note": "还没有跑过。在仓库 Settings → Secrets 里加上 ANTHROPIC_API_KEY，然后在 Actions 页面手动点一次「每周热点聚合」，或者等周一自动跑。",
+  "items": []
+}

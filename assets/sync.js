@@ -162,25 +162,47 @@ window.Sync = (function () {
     return null;
   }
 
-  async function load() {
-    if (cloudEnabled()) {
-      try {
-        var remote = await readRemote();
-        lastSeenRemoteAt = remote.updated_at;
-        writeAllowed = true;              // 只有走到这里才解锁云端写入
-        if (remote.data) {
-          try { localStorage.setItem(LS_KEY, JSON.stringify(remote.data)); } catch (e) {}
-          return { state: remote.data, src: "cloud" };
-        }
-        // 云端可读但还没有数据 —— 允许把本地数据作为首份数据推上去
-        return { state: readLocal(), src: "cloud-empty" };
-      } catch (e) {
-        writeAllowed = false;
-        emit({ kind: "readonly", message: e.message });
-        return { state: readLocal(), src: "local-readonly", error: e.message };
+  /*
+   * 启动分成两步，这是「秒开」的关键。
+   *
+   * 旧的 load() 要等 GitHub 返回才 return，界面就得干等一次网络往返 ——
+   * 手机信号差的时候就是两三秒白屏。
+   *
+   * 现在：
+   *   loadLocal()  同步返回本地数据，界面立刻画出来
+   *   loadCloud()  在后台跑，回来之后再决定要不要换成云端那份
+   *
+   * 写云端的安全约束不变：loadCloud() 成功之前 writeAllowed 一直是 false，
+   * 所以这段时间里的改动只落本地，不会覆盖云端。
+   */
+  function loadLocal() {
+    return readLocal();
+  }
+
+  async function loadCloud() {
+    if (!cloudEnabled()) return { src: "local" };
+    try {
+      var remote = await readRemote();
+      lastSeenRemoteAt = remote.updated_at;
+      writeAllowed = true;              // 只有走到这里才解锁云端写入
+      if (remote.data) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(remote.data)); } catch (e) {}
+        return { state: remote.data, src: "cloud" };
       }
+      // 云端可读但还没有数据 —— 允许把本地数据作为首份数据推上去
+      return { src: "cloud-empty" };
+    } catch (e) {
+      writeAllowed = false;
+      emit({ kind: "readonly", message: e.message });
+      return { src: "local-readonly", error: e.message };
     }
-    return { state: readLocal(), src: "local" };
+  }
+
+  // 兼容旧调用方式，内部就是上面两步
+  async function load() {
+    var local = loadLocal();
+    var cloud = await loadCloud();
+    return { state: cloud.state || local, src: cloud.src, error: cloud.error };
   }
 
   /* ---------- 保存 ---------- */
@@ -299,7 +321,8 @@ window.Sync = (function () {
     LS_KEY: LS_KEY, GIST_DESC: GIST_DESC,
     getCfg: getCfg, saveCfg: saveCfg, clearCreds: clearCreds,
     cloudEnabled: cloudEnabled, canWriteCloud: canWriteCloud,
-    load: load, save: save, flush: flush, pull: pull, forcePush: forcePush,
+    load: load, loadLocal: loadLocal, loadCloud: loadCloud,
+    save: save, flush: flush, pull: pull, forcePush: forcePush,
     connect: connect, getGistId: getGistId, status: status, on: on
   };
 })();

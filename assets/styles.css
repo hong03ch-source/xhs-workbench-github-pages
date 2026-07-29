@@ -93,9 +93,28 @@ body{
   line-height:1.55;
   -webkit-font-smoothing:antialiased;
   padding-bottom:env(safe-area-inset-bottom);
+  /* 装到主屏幕之后，整页橡皮筋回弹会很像网页；关掉它就像原生 App 了 */
+  overscroll-behavior-y:contain;
+  -webkit-tap-highlight-color:transparent;
 }
+
+/*
+   iOS 上「像网页」的三个破绽：点一下有灰色高亮方块、长按会选中文字弹出
+   复制菜单、点击有延迟。下面三行分别对应这三件事。
+   输入框要单独放行，否则没法选中编辑。
+*/
+button,.chip,.tab,.stage-tab,.ticket,.seg,.fchip,.col-head,.metric,.cal-item,.sb-m{
+  -webkit-user-select:none;user-select:none;
+  touch-action:manipulation;
+}
+input,textarea,select,.tk-title,.tk-hook,.item .row,.recall{-webkit-user-select:text;user-select:text}
+
 button{font-family:inherit;font-size:inherit;cursor:pointer;border:none;background:none;color:inherit}
 input,textarea,select{font-family:inherit;font-size:var(--fs-m);color:inherit}
+/* iOS 上 font-size < 16px 的输入框，聚焦时 Safari 会强行放大整个页面 */
+@supports (-webkit-touch-callout:none){
+  input,textarea,select{font-size:16px}
+}
 a{color:var(--blue)}
 :focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -175,7 +194,8 @@ a{color:var(--blue)}
    布局
    ========================================================================= */
 .wrap{max-width:1180px;margin:0 auto;padding:16px 20px 72px}
-.view{animation:fade .2s var(--ease)}
+/* 切视图的淡入压到 120ms：再长就开始「看得见在等」，反而显慢 */
+.view{animation:fade .12s var(--ease)}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .sec-title{font-size:var(--fs-xl);font-weight:600;letter-spacing:-.3px;margin-bottom:4px}
 .sec-sub{font-size:var(--fs-s);color:var(--ink-3);margin-bottom:16px;max-width:660px;line-height:1.6}
@@ -353,8 +373,23 @@ a{color:var(--blue)}
   border-radius:var(--r-s);padding:5px 11px
 }
 .item .links a:hover{background:var(--surface-2);color:var(--ink)}
-.item-foot{display:flex;align-items:center;gap:8px;margin-top:2px}
+.item-foot{display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap}
 .stamp{font-size:var(--fs-xs);color:var(--ink-3);margin-left:auto}
+
+/* 分区小标题（热点库的「本周建议」/「我记的」） */
+.sub-head{display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap}
+.sub-title{font-size:var(--fs-l);font-weight:600}
+.sub-head .stamp{margin-left:0}
+
+/* 搜索聚合来的条目：视觉上和自己记的区分开 */
+.item.suggested{border-style:dashed}
+.sources{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.sources a{
+  font-size:var(--fs-xs);color:var(--ink-2);text-decoration:none;
+  border:1px solid var(--line);border-radius:20px;padding:3px 9px;
+  max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.sources a:hover{background:var(--surface-2);color:var(--ink)}
 
 /* =========================================================================
    复盘

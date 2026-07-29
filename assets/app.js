@@ -177,6 +177,7 @@
 
   var state = blankState();
   var readonlyCloud = false;
+  var dirty = false;          // 本次会话里你有没有改过东西，云端对账时用来判断能不能直接覆盖
 
   function blankState() {
     return {
@@ -276,6 +277,7 @@
   }
 
   function persist() {
+    dirty = true;
     state.meta.updatedAt = new Date().toISOString();
     Sync.save(state);
   }
@@ -772,11 +774,119 @@
      热点库
      ===================================================================== */
 
+  /*
+   * 每周搜索聚合的结果。由 GitHub Actions 跑 scripts/fetch-hotspots.mjs 生成，
+   * 用的是 Claude API 的 web_search 工具检索公开网络索引 —— 不碰平台接口。
+   *
+   * 这些条目不直接进你的库：先当「建议」展示，点「采用」才写入 state.hotspots。
+   * 这样你的库里始终只有你亲自认可过的东西。
+   */
+  var suggested = { items: [], generatedAt: null, note: "" };
+
+  function loadSuggested() {
+    return fetch("data/hotspots.json", { cache: "no-cache" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && Array.isArray(d.items)) suggested = d;
+        renderSuggested();
+      })
+      .catch(function () { /* 离线或还没跑过，静默跳过 */ });
+  }
+
+  function renderSuggested() {
+    var wrap = $("#hot-suggested-wrap");
+    var box = $("#hot-suggested");
+    if (!wrap || !box) return;
+    clear(box);
+
+    // 已经采用过的就不再出现在建议区
+    var adopted = state.hotspots.map(function (h) { return h.title; });
+    var items = (suggested.items || []).filter(function (s) { return adopted.indexOf(s.title) < 0; });
+
+    if (!items.length) {
+      wrap.hidden = !suggested.generatedAt;
+      if (suggested.generatedAt) {
+        box.appendChild(el("div", { class: "empty", text: "本周这批都采用过了。下周一会自动更新。" }));
+      }
+      updateSuggestedMeta();
+      return;
+    }
+    wrap.hidden = false;
+    updateSuggestedMeta();
+
+    items.forEach(function (s) {
+      var card = el("div", { class: "item suggested" });
+      card.appendChild(el("div", { class: "row" }, [
+        el("span", { class: "chip", text: s.platform || "小红书" }),
+        document.createTextNode(" "),
+        el("span", { class: "chip " + (s.heat === "高" ? "red" : s.heat === "中高" ? "amber" : ""), text: (s.heat || "中") + "热度" }),
+        document.createTextNode(" "),
+        el("span", { class: "chip blue", text: "搜索聚合" })
+      ]));
+      card.appendChild(el("h4", { text: s.title }));
+      if (s.why) card.appendChild(el("div", { class: "row" }, [el("b", { text: "为什么火：" }), document.createTextNode(s.why)]));
+      if (s.angle) card.appendChild(el("div", { class: "row" }, [el("b", { text: "你可以：" }), document.createTextNode(s.angle)]));
+      if (s.tip) card.appendChild(el("div", { class: "tip", text: s.tip }));
+
+      // 来源必须可点开验证 —— 搜来的东西看起来和真榜单一样，你得能自己判断
+      if (Array.isArray(s.sources) && s.sources.length) {
+        var src = el("div", { class: "sources" });
+        s.sources.forEach(function (u) {
+          if (!u || !/^https?:\/\//.test(String(u.url))) return;
+          src.appendChild(el("a", { href: u.url, target: "_blank", rel: "noopener noreferrer", title: u.url, text: u.title || u.url }));
+        });
+        if (src.childNodes.length) {
+          card.appendChild(el("div", { class: "row muted", style: "font-size:var(--fs-xs)", text: "来源（点开自己验一眼）" }));
+          card.appendChild(src);
+        }
+      }
+
+      card.appendChild(el("div", { class: "item-foot" }, [
+        el("button", { class: "btn btn-sm btn-primary", type: "button", text: "采用", onclick: function () { adoptSuggested(s); } }),
+        el("button", { class: "btn btn-sm", type: "button", text: "不感兴趣", onclick: function () { dismissSuggested(s); } })
+      ]));
+      box.appendChild(card);
+    });
+  }
+
+  function updateSuggestedMeta() {
+    var at = $("#hot-gen-at");
+    if (at) {
+      at.textContent = suggested.generatedAt
+        ? "更新于 " + String(suggested.generatedAt).slice(0, 10) + (suggested.searches ? " · 搜索 " + suggested.searches + " 次" : "")
+        : "还没跑过（需要在仓库 Secrets 里加 ANTHROPIC_API_KEY）";
+    }
+    var note = $("#hot-note");
+    if (note) {
+      note.hidden = !suggested.note;
+      note.textContent = suggested.note || "";
+    }
+  }
+
+  function adoptSuggested(s) {
+    state.hotspots.unshift({
+      id: uid(), addedAt: today(), used: false,
+      title: s.title, platform: s.platform || "小红书", heat: s.heat || "中",
+      why: s.why || "", angle: s.angle || "", tip: s.tip || "",
+      suggestedTitle: s.suggestedTitle || s.title,
+      sources: Array.isArray(s.sources) ? s.sources : []
+    });
+    persist(); renderHot(); renderSuggested();
+    toast("已收进你的库");
+  }
+
+  function dismissSuggested(s) {
+    suggested.items = suggested.items.filter(function (x) { return x !== s; });
+    renderSuggested();
+    toast("这条本周不再出现", { action: "撤回", onAction: function () { loadSuggested(); } });
+  }
+
   function renderHot() {
     var box = $("#hot-grid");
     clear(box);
+    renderSuggested();
     if (!state.hotspots.length) {
-      box.appendChild(el("div", { class: "empty", text: "还没有记录。刷到好选题就点上面的按钮记一条。" }));
+      box.appendChild(el("div", { class: "empty", text: "还没有记录。刷到好选题就点上面的按钮记一条，或者从「本周建议」里采用。" }));
       return;
     }
     state.hotspots.forEach(function (h) {
@@ -790,6 +900,16 @@
       if (h.why) card.appendChild(el("div", { class: "row" }, [el("b", { text: "为什么火：" }), document.createTextNode(h.why)]));
       if (h.angle) card.appendChild(el("div", { class: "row" }, [el("b", { text: "我的角度：" }), document.createTextNode(h.angle)]));
       if (h.tip) card.appendChild(el("div", { class: "tip", text: h.tip }));
+
+      // 从建议区采用过来的会带着来源，留着方便以后回头核对
+      if (Array.isArray(h.sources) && h.sources.length) {
+        var hs = el("div", { class: "sources" });
+        h.sources.forEach(function (u) {
+          if (!u || !/^https?:\/\//.test(String(u.url))) return;
+          hs.appendChild(el("a", { href: u.url, target: "_blank", rel: "noopener noreferrer", title: u.url, text: u.title || u.url }));
+        });
+        if (hs.childNodes.length) card.appendChild(hs);
+      }
 
       card.appendChild(el("div", { class: "item-acts" }, [
         el("button", { type: "button", title: "编辑", "aria-label": "编辑", text: "✎", onclick: function () { editHotspot(h.id); } }),
@@ -1367,17 +1487,40 @@
      ===================================================================== */
 
   var VIEWS = ["board", "hot", "review", "biz", "rivals"];
+  var currentView = "board";
+  var calMode = false;
+  var suggestedLoaded = false;
+
+  /*
+   * 只渲染当前看得见的那个视图。
+   *
+   * 旧版每次 refresh() 都把 8 个模块全渲一遍（含日历的 42 个格子），
+   * 其中 7 个是 hidden 的 —— 纯粹白烧主线程。改完之后每次操作的
+   * 渲染量大概只有原来的六分之一。
+   */
+  function renderActiveView() {
+    if (currentView === "board") {
+      if (calMode) renderCalendar();
+      else { renderTagFilters(); renderBoard(); }
+    } else if (currentView === "hot") {
+      if (!suggestedLoaded) { suggestedLoaded = true; whenIdle(loadSuggested); }
+      renderHot();
+    } else if (currentView === "review") {
+      renderReviewForm(); renderInsights(); renderReviews();
+    } else if (currentView === "biz") {
+      renderBiz();
+    } else if (currentView === "rivals") {
+      renderRivals();
+    }
+  }
 
   function go(view, silent) {
     if (VIEWS.indexOf(view) < 0) view = "board";
+    currentView = view;
     VIEWS.forEach(function (v) { document.getElementById("view-" + v).hidden = v !== view; });
     $$(".tab").forEach(function (b) { b.setAttribute("aria-selected", b.dataset.view === view ? "true" : "false"); });
-    $("#statusbar").hidden = false;
     if (!silent && location.hash.slice(1).split("?")[0] !== view) location.hash = view;
-    if (view === "review") { renderReviewForm(); renderInsights(); renderReviews(); }
-    if (view === "biz") renderBiz();
-    if (view === "hot") renderHot();
-    if (view === "rivals") renderRivals();
+    renderActiveView();
   }
 
   function readHash() {
@@ -1460,7 +1603,118 @@
 
   function openSync() {
     fillSyncModal();
-    openModal("modal-sync");
+    hidePairing();
+    openModal("modal-sync", hidePairing);   // 关窗时也要把令牌从 DOM 里擦掉
+  }
+
+  /* =====================================================================
+     设备配对
+     在手机上重新申请一次 GitHub 令牌要走十来步，还得用手机键盘敲一长串。
+     这里把已连接设备上的凭证编成一个二维码，另一台设备扫一下就完成配对。
+     凭证走的是「屏幕 → 摄像头」，不经过网络，也不经过任何第三方。
+
+     安全上做了三件事：
+       1. 配对链接放在 URL 的 # 片段里 —— 浏览器不会把它发给服务器
+       2. 另一台设备一打开就立刻清掉地址栏，不留在历史记录
+       3. 内置 10 分钟有效期，万一被截图了过期也用不了
+     ===================================================================== */
+
+  var pairTimer = null;
+
+  function b64urlEncode(str) {
+    return btoa(unescape(encodeURIComponent(str)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  function b64urlDecode(s) {
+    var b = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (b.length % 4) b += "=";
+    return decodeURIComponent(escape(atob(b)));
+  }
+
+  function buildPairURL() {
+    var cfg = Sync.getCfg() || {};
+    var p = { exp: Date.now() + 10 * 60 * 1000 };
+    if (cfg.type === "supabase") {
+      if (!cfg.url || !cfg.key) return null;
+      p.ty = "supabase"; p.u = cfg.url; p.k = cfg.key;
+    } else {
+      if (!cfg.token) return null;
+      p.ty = "github"; p.t = cfg.token; if (cfg.gistId) p.g = cfg.gistId;
+    }
+    return location.origin + location.pathname + "#pair=" + b64urlEncode(JSON.stringify(p));
+  }
+
+  function loadQRLib() {
+    if (window.QRCode) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
+      s.onload = function () { resolve(!!window.QRCode); };
+      s.onerror = function () { resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function showPairing() {
+    var url = buildPairURL();
+    if (!url) { toast("这台设备还没连上云端，先在上面填令牌并连接", { tone: "bad" }); return; }
+    $("#pair-panel").hidden = false;
+    $("#pair-link").value = url;
+
+    var canvas = $("#pair-qr");
+    var fb = $("#pair-fallback");
+    canvas.hidden = false; fb.hidden = true;
+    loadQRLib().then(function (ok) {
+      if (!ok) { canvas.hidden = true; fb.hidden = false; return; }
+      window.QRCode.toCanvas(canvas, url, { width: 208, margin: 1 }, function (err) {
+        if (err) { canvas.hidden = true; fb.hidden = false; }
+      });
+    });
+
+    clearTimeout(pairTimer);
+    pairTimer = setTimeout(function () {
+      hidePairing();
+      toast("配对码已过期，需要的话重新点一次");
+    }, 10 * 60 * 1000);
+  }
+
+  function hidePairing() {
+    clearTimeout(pairTimer);
+    var panel = $("#pair-panel");
+    if (!panel) return;
+    panel.hidden = true;
+    $("#pair-link").value = "";     // 别把令牌留在 DOM 里
+    var c = $("#pair-qr");
+    if (c && c.getContext) c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  }
+
+  // 启动最早期调用：必须在 Sync.load() 之前把凭证就位
+  function consumePairing() {
+    var m = location.hash.match(/[#&]pair=([A-Za-z0-9\-_]+)/);
+    if (!m) return false;
+
+    // 先清地址栏，再做别的 —— 不能让令牌留在浏览历史里
+    try { history.replaceState(null, "", location.pathname + location.search); }
+    catch (e) { location.hash = ""; }
+
+    var p;
+    try { p = JSON.parse(b64urlDecode(m[1])); }
+    catch (e) { toast("配对码读不出来，请在另一台设备上重新生成", { tone: "bad", timeout: 12000 }); return false; }
+
+    if (p.exp && Date.now() > p.exp) {
+      toast("配对码已过期（超过 10 分钟），请重新生成一个", { tone: "bad", timeout: 12000 });
+      return false;
+    }
+    var cfg = { remember: true, type: p.ty === "supabase" ? "supabase" : "github" };
+    if (cfg.type === "supabase") { cfg.url = p.u; cfg.key = p.k; }
+    else { cfg.token = p.t; if (p.g) cfg.gistId = p.g; }
+
+    if (!(cfg.token || (cfg.url && cfg.key))) {
+      toast("配对码不完整，请重新生成", { tone: "bad" });
+      return false;
+    }
+    Sync.saveCfg(cfg);
+    return true;
   }
 
   function doConnect() {
@@ -1558,10 +1812,19 @@
      主题
      ===================================================================== */
 
+  /*
+   * 主题另外存一个极小的 key。
+   * index.html 头部有段内联脚本会同步读它，在第一帧之前就把 data-theme 设好 ——
+   * 否则深色模式用户每次打开都会先闪一下白屏。读整个 state 太慢，所以单独存。
+   */
   function applyTheme() {
     var t = state.ui.theme;
     if (t) document.documentElement.setAttribute("data-theme", t);
     else document.documentElement.removeAttribute("data-theme");
+    try {
+      if (t) localStorage.setItem("xhs_theme", t);
+      else localStorage.removeItem("xhs_theme");
+    } catch (e) {}
   }
   function toggleTheme() {
     var cur = state.ui.theme;
@@ -1622,15 +1885,7 @@
   function refresh() {
     applyTheme();
     renderStatusbar();
-    renderTagFilters();
-    renderBoard();
-    renderCalendar();
-    renderHot();
-    renderRivals();
-    renderReviewForm();
-    renderInsights();
-    renderReviews();
-    renderBiz();
+    renderActiveView();
     updateSyncButton();
   }
 
@@ -1657,6 +1912,7 @@
 
     $("#btn-new-hot").onclick = function () { editHotspot(null); };
     $("#btn-new-rival").onclick = function () { editRival(null); };
+    $("#btn-hot-refresh").onclick = function () { loadSuggested().then(function () { toast("已重新读取"); }); };
 
     $("#rv-form").addEventListener("submit", submitReview);
     $("#rv-idea").addEventListener("change", function (e) { renderRecall(e.target.value); });
@@ -1699,16 +1955,34 @@
     $("#btn-reset").onclick = function () { closeModal($("#modal-sync")); resetAll(); };
     $("#btn-theme").onclick = toggleTheme;
 
+    $("#btn-pair").onclick = showPairing;
+    $("#btn-pair-hide").onclick = hidePairing;
+    $("#btn-pair-copy").onclick = function () {
+      var v = $("#pair-link").value;
+      if (!v) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(v).then(
+          function () { toast("已复制。10 分钟内有效，用完记得从聊天记录里删掉"); },
+          function () { $("#pair-link").select(); toast("复制失败，已选中，请手动复制", { tone: "bad" }); }
+        );
+      } else {
+        $("#pair-link").select();
+        toast("已选中，请手动复制");
+      }
+    };
+
     $("#first-demo").onclick = function () { closeModal($("#modal-first")); loadDemo(); toast("示例已加载，随时可以在「数据与备份」里清空"); };
     $("#first-blank").onclick = function () { closeModal($("#modal-first")); state.meta.initialized = true; persist(); refresh(); };
   }
 
-  function setMode(m) {
-    $("#pane-board").hidden = m !== "board";
-    $("#pane-cal").hidden = m !== "cal";
-    $("#mode-board").setAttribute("aria-pressed", m === "board" ? "true" : "false");
-    $("#mode-cal").setAttribute("aria-pressed", m === "cal" ? "true" : "false");
-    if (m === "cal") renderCalendar();
+  function setMode(m, silent) {
+    calMode = m === "cal";
+    $("#pane-board").hidden = calMode;
+    $("#pane-cal").hidden = !calMode;
+    $("#mode-board").setAttribute("aria-pressed", calMode ? "false" : "true");
+    $("#mode-cal").setAttribute("aria-pressed", calMode ? "true" : "false");
+    if (silent) return;                    // 启动时由 readHash 统一渲染，别渲两遍
+    if (calMode) renderCalendar(); else renderBoard();
   }
 
   /* =====================================================================
@@ -1718,6 +1992,9 @@
   function registerSW() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("sw.js").then(function (reg) {
+      // 缓存策略是「先给缓存再后台更新」，所以主动催一次版本检查，
+      // 保证新版本最多晚一次打开就能拿到
+      try { reg.update(); } catch (e) {}
       reg.addEventListener("updatefound", function () {
         var sw = reg.installing;
         if (!sw) return;
@@ -1730,33 +2007,105 @@
     }).catch(function (e) { console.warn("SW 注册失败", e); });
   }
 
-  async function boot() {
+  /*
+   * 云端回来之后的对账。
+   *
+   * 界面早就用本地数据画出来了，这里判断能不能把它换成云端那份：
+   *   - 你还没动过任何东西 → 直接换，静默刷新
+   *   - 你已经改过了 → 不能覆盖你的改动，挂冲突条让你自己选
+   */
+  function reconcileCloud(res, paired) {
+    if (res.src === "cloud" && res.state) {
+      if (JSON.stringify(res.state) === JSON.stringify(state)) {
+        updateSyncButton();
+        if (paired) toast("配对成功，数据已经是最新的", { timeout: 6000 });
+        return;
+      }
+      if (dirty) {
+        banner("b-conflict", "warn",
+          "云端有一份和本机不一样的数据，而你刚才已经改过东西了。为免覆盖，先由你决定。",
+          [
+            { label: "用云端的", fn: function () {
+                state = normalize(res.state); dirty = false; refresh();
+                var b = $("#b-conflict"); if (b) b.remove();
+                toast("已切换成云端那份");
+              } },
+            { label: "保留本机的", fn: function () {
+                Sync.forcePush(state).then(function () {
+                  updateSyncButton();
+                  var b = $("#b-conflict"); if (b) b.remove();
+                  toast("已用本机数据覆盖云端");
+                }).catch(function (e) { toast("失败：" + e.message, { tone: "bad" }); });
+              } }
+          ]);
+        return;
+      }
+      state = normalize(res.state);
+      refresh();
+      toast(paired ? "配对成功，已同步到你其它设备上的那份数据" : "已从云端更新", { timeout: paired ? 8000 : 2600 });
+      return;
+    }
+
+    if (res.src === "local-readonly") {
+      readonlyCloud = true;
+      if (paired) toast("配对了，但云端读不通：" + (res.error || ""), { tone: "bad", timeout: 15000 });
+      // 只读横幅由 Sync 的事件回调统一挂，这里不重复
+    } else if (res.src === "cloud-empty" && paired) {
+      toast("配对成功，云端还是空的，这台设备的数据会作为第一份推上去", { timeout: 10000 });
+    }
+    updateSyncButton();
+  }
+
+  // 浏览器闲下来再做，别跟首屏渲染抢主线程
+  function whenIdle(fn) {
+    if (window.requestIdleCallback) requestIdleCallback(fn, { timeout: 2000 });
+    else setTimeout(fn, 300);
+  }
+
+  /*
+   * 启动。
+   *
+   * 旧版是 await Sync.load() 之后才画界面 —— 等于每次打开都要先做一次
+   * 网络往返，手机信号差的时候就是两三秒白屏。
+   *
+   * 现在分三步：本地数据同步读出来立刻画（几十毫秒）→ 云端后台对账 →
+   * 次要的东西等空闲。感知上就是「点开就在」。
+   */
+  function boot() {
     initIdeaModal();
     bind();
 
-    var res = { state: null, src: "local" };
-    try { res = await Sync.load(); } catch (e) { console.warn("加载失败，用本机数据", e); }
-    state = normalize(res.state);
+    var paired = consumePairing();   // 必须最先跑，扫码进来的凭证要先就位
 
-    if (res.src === "local-readonly") readonlyCloud = true;
+    /* 第一步：本地数据，立刻画 */
+    var local = null;
+    try { local = Sync.loadLocal(); } catch (e) { console.warn("本地数据读取失败", e); }
+    state = normalize(local);
 
     applyTheme();
-    refresh();
-    readHash();
-    setMode("board");
     activeStage = state.ideas.some(function (i) { return i.stage === "script"; }) ? "script" : "pool";
-    renderStageTabs();
-    $$(".col", $("#board")).forEach(function (c) { c.classList.toggle("active", c.dataset.stage === activeStage); });
-
+    setMode("board", true);
+    readHash();              // 内部只渲染当前视图，整个启动只渲染一次
+    renderStatusbar();
+    updateSyncButton();
     $("#foot-version").textContent = "版本 " + C.build;
 
-    // 首次使用才问，且从不在只读状态下写入
-    if (!state.meta.initialized && !state.ideas.length && res.src !== "local-readonly") {
+    if (!state.meta.initialized && !state.ideas.length && !Sync.cloudEnabled()) {
       openModal("modal-first");
     }
 
-    registerSW();
-    if (/[?&]selftest=1/.test(location.search)) selfTest();
+    /* 第二步：云端后台对账，不挡界面 */
+    if (Sync.cloudEnabled()) {
+      Sync.loadCloud()
+        .then(function (res) { reconcileCloud(res, paired); })
+        .catch(function (e) { console.warn("云端加载失败", e); updateSyncButton(); });
+    }
+
+    /* 第三步：等浏览器空了再做 */
+    whenIdle(function () {
+      registerSW();
+      if (/[?&]selftest=1/.test(location.search)) selfTest();
+    });
   }
 
   window.__wb = { selfTest: selfTest, getState: function () { return state; } };

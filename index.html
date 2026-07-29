@@ -18,6 +18,18 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
 <link rel="apple-touch-icon" href="assets/icon.svg">
+
+<!-- 提前把 TLS 握手做掉，第一次同步能少等一个来回 -->
+<link rel="preconnect" href="https://api.github.com" crossorigin>
+
+<!--
+  必须在样式表之前、同步执行：在第一帧画出来之前就把主题定下来。
+  否则手动选了深色的人，每次打开都会先闪一下白屏 —— 那一下最毁「像软件」的感觉。
+  单独存一个小 key 而不是读整个 state，是为了不阻塞。
+-->
+<script>
+(function(){try{var t=localStorage.getItem("xhs_theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}})();
+</script>
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
@@ -89,10 +101,25 @@
   <section class="view" id="view-hot" role="tabpanel" hidden>
     <h2 class="sec-title">热点库</h2>
     <p class="sec-sub">
-      抖音和小红书都没有公开 API，站外抓取会被风控 —— 所以这里不做也不假装做自动抓取。
-      这是你自己的选题库：刷到好东西随手记一条，需要时一键变成选题。手记的比爬来的准。
+      两个来源：<b>你自己记的</b>（刷到好东西随手存，准）和 <b>每周搜索聚合</b>（GitHub Actions
+      每周一跑一次，搜公开网络上的行业报道与榜单，广）。搜来的每条都带来源链接 ——
+      混着营销号是常态，你得能一眼验。点「采用」才会进你自己的库。
     </p>
-    <div style="margin-bottom:14px"><button class="btn btn-primary" id="btn-new-hot">记一条热点</button></div>
+
+    <section id="hot-suggested-wrap" hidden>
+      <div class="sub-head">
+        <h3 class="sub-title">本周建议</h3>
+        <span class="stamp" id="hot-gen-at"></span>
+        <button class="btn btn-sm" id="btn-hot-refresh">重新读取</button>
+      </div>
+      <div class="tip-box" id="hot-note" hidden></div>
+      <div class="grid grid-3" id="hot-suggested" style="margin-bottom:26px"></div>
+    </section>
+
+    <div class="sub-head">
+      <h3 class="sub-title">我记的</h3>
+      <button class="btn btn-primary btn-sm" id="btn-new-hot">记一条热点</button>
+    </div>
     <div class="grid grid-3" id="hot-grid"></div>
   </section>
 
@@ -295,14 +322,24 @@
         数据存到你自己的 <b>GitHub Gist</b>（私密）：免费、不依赖电脑开机、多设备同步。
         需要一个带 <code>gist</code> 权限的个人访问令牌。其它设备填同一个令牌会自动找到这份数据。
       </div>
+      <div class="tip-box">
+        <b>怎么拿令牌：</b>GitHub → 头像 → Settings → 拉到最底 Developer settings →
+        Personal access tokens → <b>Tokens (classic)</b> → Generate new token →
+        权限只勾 <code>gist</code> 一个 → 生成后复制那串 <code>ghp_</code> 开头的字（只显示一次）。
+        <br>
+        注意必须选 <b>classic</b>，fine-grained 令牌目前不支持 Gist，填了会一直连不上。
+      </div>
       <div class="tip-box danger">
-        令牌是账号级凭证，任何拿到它的人都能读写你的全部 Gist。
-        建议用 fine-grained token 且只勾 gist 权限；共用电脑上请选下面的「只记住本次会话」。
+        令牌是账号级凭证，拿到它的人能读写你的全部 Gist。所以权限只勾 gist、别勾多；
+        共用电脑上请把下面的「记住令牌」取消勾选。
+        <br>
+        每台设备可以各生成一个令牌，互不影响，都指向同一份数据 ——
+        不用想办法把电脑上那个传到手机，在手机上现场生成一个新的更省事。
       </div>
 
       <div class="fld">
         <label for="sync-token">GitHub 令牌</label>
-        <input class="inp" id="sync-token" type="password" placeholder="github_pat_… 或 ghp_…" autocomplete="off" spellcheck="false">
+        <input class="inp" id="sync-token" type="password" placeholder="ghp_… （classic token）" autocomplete="off" spellcheck="false">
       </div>
       <label class="switch"><input type="checkbox" id="sync-remember" checked>记住令牌（不勾则关掉浏览器就失效）</label>
       <div class="fld" id="wrap-gist" hidden>
@@ -315,6 +352,28 @@
         <div class="fld" style="margin-top:8px"><label for="sync-url">Project URL</label><input class="inp" id="sync-url" placeholder="https://xxxx.supabase.co"></div>
         <div class="fld"><label for="sync-key">Anon / Public Key</label><input class="inp" id="sync-key" placeholder="eyJ…"></div>
       </details>
+
+      <div class="block">
+        <div class="block-h">多设备 <span>手机 / iPad 扫一下就好，不用再申请一次令牌</span></div>
+        <button class="btn btn-sm" id="btn-pair" type="button">添加另一台设备</button>
+        <div id="pair-panel" hidden style="margin-top:12px">
+          <div class="tip-box danger">
+            这个二维码等同于你的令牌 —— 当面扫，别截图发给任何人。10 分钟后自动失效。
+          </div>
+          <div style="display:flex;justify-content:center"><canvas id="pair-qr"></canvas></div>
+          <div id="pair-fallback" hidden class="fld-hint" style="text-align:center;margin-top:8px">
+            二维码没加载出来（可能没网），用下面的链接在另一台设备上打开：
+          </div>
+          <div class="fld" style="margin-top:10px">
+            <label for="pair-link">配对链接</label>
+            <input class="inp" id="pair-link" readonly onclick="this.select()">
+          </div>
+          <div class="picks" style="gap:8px">
+            <button class="btn btn-sm" id="btn-pair-copy" type="button">复制链接</button>
+            <button class="btn btn-sm" id="btn-pair-hide" type="button">收起</button>
+          </div>
+        </div>
+      </div>
 
       <div class="block">
         <div class="block-h">备份与数据</div>

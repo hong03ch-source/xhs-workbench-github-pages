@@ -10,7 +10,7 @@
  *   图标 / manifest  → stale-while-revalidate，先给缓存再后台更新
  * 并且发现新版本时通知页面，由页面弹一个「有新版本，点击刷新」。
  */
-var VERSION = "2026-07-29-1";
+var VERSION = "2026-07-29-2";
 var CACHE = "xhs-wb-" + VERSION;
 var SHELL = [
   "./", "index.html", "manifest.webmanifest",
@@ -37,10 +37,21 @@ self.addEventListener("activate", function (e) {
   );
 });
 
-function isFresh(pathname) {
-  return /\.(html|js|css)$/.test(pathname) || pathname === "/" || pathname.endsWith("/");
-}
-
+/*
+ * 统一 stale-while-revalidate：有缓存就立刻给缓存（点开即用，不等网络），
+ * 同时在后台悄悄拉一份新的存起来。
+ *
+ * 上一版我为了「让更新能生效」把 HTML/JS/CSS 改成了 network-first，
+ * 结果是每次打开都要先等一次网络往返 —— 手机信号差的时候就是白屏干等，
+ * 恰恰把「像软件一样秒开」这件事牺牲掉了。
+ *
+ * 现在两头都要：更新走 Service Worker 自己的版本机制 ——
+ * 上面的 VERSION 一变，install 时会重新抓一遍 SHELL 建新缓存，
+ * 页面那边收到 updatefound 就弹「有新版本 · 刷新」。
+ *
+ * 所以：改完代码记得把 VERSION 改掉，否则老设备不会更新。
+ * 页面每次启动还会主动调一次 registration.update() 兜底。
+ */
 self.addEventListener("fetch", function (e) {
   var req = e.request;
   if (req.method !== "GET") return;
@@ -49,32 +60,18 @@ self.addEventListener("fetch", function (e) {
   try { url = new URL(req.url); } catch (err) { return; }
   if (url.origin !== location.origin) return;          // GitHub API / CDN 一律不碰
 
-  if (isFresh(url.pathname)) {
-    // network-first：永远优先拿最新代码，离线才用缓存
-    e.respondWith(
-      fetch(req)
-        .then(function (res) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(req, copy); });
-          return res;
-        })
-        .catch(function () {
-          return caches.match(req).then(function (hit) {
-            return hit || caches.match("index.html");
-          });
-        })
-    );
-    return;
-  }
-
-  // 其它静态资源：先给缓存，后台悄悄更新
   e.respondWith(
     caches.match(req).then(function (hit) {
       var net = fetch(req).then(function (res) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        if (res && res.ok && res.type === "basic") {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        }
         return res;
-      }).catch(function () { return hit; });
+      }).catch(function () {
+        // 离线：有缓存就用缓存，导航请求兜底回首页
+        return hit || (req.mode === "navigate" ? caches.match("index.html") : undefined);
+      });
       return hit || net;
     })
   );
