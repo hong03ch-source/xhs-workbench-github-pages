@@ -171,6 +171,20 @@
     if (t.classList && t.classList.contains("modal-bg")) closeModal(t);
   });
 
+  /*
+   * iOS 的软键盘不会改变 vh，所以弹窗里靠下的输入框会被键盘直接盖住，
+   * 你打字时看不见自己在打什么 —— iPad 横屏（高度只有 744–1024）最明显。
+   * 聚焦时把它滚到可视区中间；延迟一点是等键盘弹出动画结束，否则位置算错。
+   */
+  document.addEventListener("focusin", function (e) {
+    if (!modalStack.length) return;
+    var t = e.target;
+    if (!t.closest || !t.closest(".modal-body")) return;
+    setTimeout(function () {
+      try { t.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (err) {}
+    }, 250);
+  });
+
   /* =====================================================================
      状态
      ===================================================================== */

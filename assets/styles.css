@@ -576,7 +576,59 @@ details.adv summary{cursor:pointer;color:var(--ink-2);padding:6px 0}
 @media (max-width:1000px){
   .review-layout{grid-template-columns:1fr}
   .review-form{position:static}
+}
+
+/*
+   iPad 竖屏是 744–1024px，全都在下面那个 720px 手机断点以上，
+   所以之前它拿到的是电脑版：4 列 + 拖拽 + 悬停才出现的按钮。
+   但 iPad 是触屏 —— 拖拽在 Safari 上不触发，触屏也没有「悬停」，
+   结果卡片移不动、按钮点不出来。
+
+   所以这里按「有没有悬停能力 / 是不是粗指针」分，而不是只看宽度。
+   两个条件都写上：iPad 接了妙控键盘触控板时，两种上报都可能出现。
+*/
+@media (hover:none),(pointer:coarse){
+  /* 动作按钮常驻，不能指望悬停 */
+  .tk-acts{opacity:1}
+  /* 按钮常驻之后会压到标题右上角，给标题让出位置 */
+  .tk-title{padding-right:70px}
+  /* 用按钮推进阶段，替代拖不动的拖拽 */
+  .tk-move{display:flex}
+  .ticket{cursor:default}
+  /* 触屏上这些悬停态要么不触发，要么点完卡住不走，干脆关掉 */
+  .ticket:hover{border-color:var(--line);box-shadow:none}
+  .card:hover,.item:hover{box-shadow:none}
+  .btn:hover{background:var(--surface)}
+  .btn-primary:hover{filter:none}
+  /* 手指目标放大一点 */
+  .tk-acts button{width:30px;height:30px}
+  .icon-btn{width:36px;height:36px}
+}
+
+/*
+   看板列数按实际可用宽度分四档，保证每列都不低于 ~270px。
+   对照 iPad 各机型的真实 CSS 像素：
+
+     iPad mini  竖 744  → 2 列，每列约 352px
+     iPad 11"   竖 820  → 2 列，每列约 390px
+     iPad 13"   竖 1024 → 3 列，每列约 322px
+     iPad mini  横 1133 → 3 列，每列约 355px
+     iPad 11"   横 1180 → 4 列，每列约 276px
+     iPad 13"   横 1366 → 4 列（.wrap 封顶 1180），每列约 276px
+
+   之前只分了 2/4 两档，iPad mini 横屏会挤成 4 列 264px，太窄。
+*/
+@media (min-width:721px) and (max-width:950px){
   .board{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (min-width:951px) and (max-width:1150px){
+  .board{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+/* iPad 竖屏的日历：7 列挤在 744–1024px 里，格子要瘦一点才不至于撑破 */
+@media (max-width:1050px){
+  .cal-day{min-height:74px;padding:5px}
+  .cal-item{font-size:10px;padding:2px 5px}
 }
 
 @media (max-width:720px){
@@ -594,7 +646,9 @@ details.adv summary{cursor:pointer;color:var(--ink-2);padding:6px 0}
   .col-head{display:none}
   .col:not(.active){display:none}
   .ticket{cursor:default}
+  /* 手机上按钮改到卡片下方排一行，标题就不用留白了 */
   .tk-acts{opacity:1;position:static;background:none;margin-top:8px;justify-content:flex-end}
+  .tk-title{padding-right:0}
   .tk-move{display:flex}
   .cal-day{min-height:64px;padding:4px}
   .cal-item{font-size:10px;padding:2px 4px}
