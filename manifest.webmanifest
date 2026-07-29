@@ -1,0 +1,14 @@
+{
+  "name": "宏的AI视频工作台",
+  "short_name": "AI工作台",
+  "description": "小红书视频博主运营工作台：流水线、热点、脚本、复盘、商单",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F5F7",
+  "theme_color": "#FF2442",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
