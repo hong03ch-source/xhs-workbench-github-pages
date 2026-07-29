@@ -1,14 +1,22 @@
 {
   "name": "宏的AI视频工作台",
   "short_name": "AI工作台",
-  "description": "小红书视频博主运营工作台：流水线、热点、脚本、复盘、商单",
-  "start_url": ".",
-  "scope": ".",
+  "description": "小红书视频博主的运营工作台：选题流水线、脚本合规预检、数据复盘、商单变现。数据存在你自己的 GitHub Gist 里。",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#F4F5F7",
+  "background_color": "#F5F6F8",
   "theme_color": "#FF2442",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["productivity", "business"],
   "icons": [
-    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "新建选题", "short_name": "新建", "url": "./#board?new=1", "description": "直接打开新建选题弹窗" },
+    { "name": "填今天的数据", "short_name": "复盘", "url": "./#review", "description": "打开复盘页录入播放/留存数据" },
+    { "name": "热点库", "short_name": "热点", "url": "./#hot", "description": "打开选题灵感库" }
   ]
 }

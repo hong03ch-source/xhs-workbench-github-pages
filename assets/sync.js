@@ -1,169 +1,305 @@
 /*
- * sync.js — 同步层（真·永久方案）
- * 三种后端，按 cfg.type 切换：
- *  - github  (默认): GitHub Gist。永久免费、不依赖本机开机，电脑/iPhone/iPad 三端同步。只需一个带 gist 权限的 PAT。
- *  - supabase: 可选，适合不想用 GitHub 的用户。
- *  - self    : 自托管后端（WorkBuddy 隧道），兼容旧配置。
- * 单用户工作台：固定 ROW_ID。读取云端优先，失败/未配置回退 localStorage。
- * 凭证（PAT / Supabase key）只存本机浏览器，不发给任何第三方。
+ * sync.js — 同步层（重写版）
+ *
+ * 修掉的三个会丢数据 / 有风险的问题：
+ *
+ * 1. 旧版启动时不管云端读没读到，最后都会 Sync.save(state) 推一次。
+ *    网络抖一下、令牌过期、GitHub 限流 —— 任意一种情况都会把本地的空数据
+ *    推上去，静默覆盖掉云端正确的数据，且不可恢复。
+ *    现在：只有确认「本次数据确实来自云端」才允许写云端，否则进入只读模式，
+ *    顶部挂提示条，你自己决定是重试还是强制以本机为准。
+ *
+ * 2. 旧版整体覆盖，state.json 里虽然写了 updated_at 却从来不读。
+ *    电脑和手机同时开着，后保存的把前一个全量吃掉。
+ *    现在：推送前先比对云端 updated_at，不一致就中止并提示。
+ *
+ * 3. 令牌永久明文存 localStorage，且没有任何清除入口。
+ *    现在：可以选择「只记住本次会话」（存 sessionStorage，关掉浏览器即失效），
+ *    并提供一键清除凭证。
+ *
+ * 凭证只存在你自己的浏览器里，不会发给除 GitHub / Supabase 官方接口以外的任何地方。
  */
 window.Sync = (function () {
-  const LS_KEY = "xhs_video_workbench_v3";
-  const CFG_KEY = "xhs_sync_cfg";
-  const ROW_ID = "macro-xhs-single";
-  const GIST_DESC = "xhs-workbench-state (do not delete)";
-  const GIST_FILE = "state.json";
-  const HOT_FILE = "hotspots.json";   // 每日热点单独存一个文件，避免覆盖用户数据
-  const API = "https://api.github.com";
+  var LS_KEY = "xhs_workbench_v4";
+  var LS_KEY_LEGACY = "xhs_video_workbench_v3";
+  var CFG_KEY = "xhs_sync_cfg";
+  var ROW_ID = "macro-xhs-single";
+  var GIST_DESC = "xhs-workbench-state (do not delete)";
+  var GIST_FILE = "state.json";
+  var API = "https://api.github.com";
+  var PUSH_DEBOUNCE = 1500;
 
-  function loadCfg() { try { return JSON.parse(localStorage.getItem(CFG_KEY) || "null"); } catch (e) { return null; } }
-  function saveCfg(c) { cfg = c || {}; try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} }
-  function getCfg() { return cfg; }
-  function cloudEnabled() {
-    if (!cfg || !cfg.type || cfg.type === "github") return !!(cfg && cfg.token);
-    return !!(cfg.url);
+  var cfg = loadCfg();
+  var writeAllowed = false;      // 未确认云端可读之前，一律不许写云端
+  var lastSeenRemoteAt = null;   // 最近一次见到的云端 updated_at，用于冲突检测
+  var pushTimer = null;
+  var pendingState = null;
+  var listeners = [];
+
+  /* ---------- 配置读写 ---------- */
+
+  function loadCfg() {
+    var raw = null;
+    try { raw = sessionStorage.getItem(CFG_KEY) || localStorage.getItem(CFG_KEY); } catch (e) {}
+    if (!raw) return { type: "github", remember: true };
+    try {
+      var c = JSON.parse(raw);
+      if (!c.type) c.type = "github";
+      if (c.remember === undefined) c.remember = true;
+      return c;
+    } catch (e) { return { type: "github", remember: true }; }
   }
 
-  let cfg = loadCfg() || { type: "github" };
+  function saveCfg(c) {
+    cfg = c || { type: "github", remember: true };
+    var json = JSON.stringify(cfg);
+    try {
+      if (cfg.remember) { localStorage.setItem(CFG_KEY, json); sessionStorage.removeItem(CFG_KEY); }
+      else { sessionStorage.setItem(CFG_KEY, json); localStorage.removeItem(CFG_KEY); }
+    } catch (e) {}
+  }
+
+  function getCfg() { return cfg; }
+
+  function clearCreds() {
+    try { localStorage.removeItem(CFG_KEY); sessionStorage.removeItem(CFG_KEY); } catch (e) {}
+    cfg = { type: "github", remember: true };
+    writeAllowed = false;
+    lastSeenRemoteAt = null;
+    emit({ kind: "creds-cleared" });
+  }
+
+  function cloudEnabled() {
+    if (!cfg || !cfg.type || cfg.type === "github") return !!(cfg && cfg.token);
+    if (cfg.type === "supabase") return !!(cfg.url && cfg.key);
+    return !!cfg.url;
+  }
+
+  function canWriteCloud() { return cloudEnabled() && writeAllowed; }
+
+  /* ---------- 事件（UI 用来挂只读提示 / 冲突提示） ---------- */
+
+  function on(fn) { listeners.push(fn); }
+  function emit(ev) { listeners.forEach(function (f) { try { f(ev); } catch (e) {} }); }
+
+  /* ---------- HTTP ---------- */
 
   async function api(method, url, body, token) {
-    const headers = { "Content-Type": "application/json", "Accept": "application/vnd.github+json" };
+    var headers = { "Content-Type": "application/json", "Accept": "application/vnd.github+json" };
     if (token) headers["Authorization"] = "Bearer " + token;
-    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    var res = await fetch(url, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined });
     if (!res.ok) {
-      let detail = "";
+      var detail = "";
       try { detail = (await res.json()).message || ""; } catch (e) {}
-      throw new Error("HTTP " + res.status + (detail ? " " + detail : ""));
+      var err = new Error("HTTP " + res.status + (detail ? " · " + detail : ""));
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return {};
     return res.json();
   }
 
-  // 找到（或创建）工作台专属 Gist，返回其 id
   async function ensureGist() {
     if (cfg.gistId) return cfg.gistId;
-    // 已存在则按描述自动查找，其它设备无需手动抄 ID
+    var list;
     try {
-      const list = await api("GET", API + "/gists?per_page=100", null, cfg.token);
-      const found = (list || []).find(g => g.description === GIST_DESC);
-      if (found) { cfg.gistId = found.id; saveCfg(cfg); return cfg.gistId; }
-    } catch (e) { /* 忽略，走下面的创建 */ }
-    const created = await api("POST", API + "/gists",
-      { description: GIST_DESC, public: false, files: { [GIST_FILE]: { content: JSON.stringify({ data: null, updated_at: new Date().toISOString() }) } } },
-      cfg.token);
+      list = await api("GET", API + "/gists?per_page=100", null, cfg.token);
+    } catch (e) {
+      // 列举失败时不能贸然创建新 Gist —— 那会产生第二份数据，正是数据分裂的开始
+      throw new Error("无法确认云端是否已有数据（" + e.message + "）");
+    }
+    var found = (list || []).find(function (g) { return g.description === GIST_DESC; });
+    if (found) { cfg.gistId = found.id; saveCfg(cfg); return cfg.gistId; }
+    var files = {};
+    files[GIST_FILE] = { content: JSON.stringify({ data: null, updated_at: new Date().toISOString() }) };
+    var created = await api("POST", API + "/gists", { description: GIST_DESC, public: false, files: files }, cfg.token);
     cfg.gistId = created.id; saveCfg(cfg);
     return cfg.gistId;
+  }
+
+  async function ensureSupabase() {
+    if (window.__sb) return window.__sb;
+    if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(cfg.url || "")) throw new Error("Supabase 地址格式不对");
+    var m = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    window.__sb = m.createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } });
+    return window.__sb;
+  }
+
+  /* ---------- 读取云端 ---------- */
+
+  async function readRemote() {
+    if (cfg.type === "supabase") {
+      var client = await ensureSupabase();
+      var r = await client.from("workbench_state").select("data,updated_at").eq("id", ROW_ID).maybeSingle();
+      if (r.error) throw new Error(r.error.message);
+      return r.data ? { data: r.data.data, updated_at: r.data.updated_at } : { data: null, updated_at: null };
+    }
+    if (cfg.type === "github") {
+      var id = await ensureGist();
+      var g = await api("GET", API + "/gists/" + id, null, cfg.token);
+      var f = g.files && g.files[GIST_FILE];
+      if (!f) return { data: null, updated_at: null };
+      var content = f.content;
+      if (f.truncated && f.raw_url) content = await (await fetch(f.raw_url)).text();
+      var p = JSON.parse(content || "{}");
+      return { data: p.data || null, updated_at: p.updated_at || null };
+    }
+    var res = await fetch(cfg.url.replace(/\/$/, "") + "/sync?k=" + encodeURIComponent(ROW_ID));
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    var j = await res.json();
+    return { data: j.data || null, updated_at: j.updated_at || null };
+  }
+
+  /* ---------- 启动加载 ---------- */
+
+  function readLocal() {
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      if (raw) return JSON.parse(raw);
+      var legacy = localStorage.getItem(LS_KEY_LEGACY);
+      if (legacy) return JSON.parse(legacy);
+    } catch (e) {}
+    return null;
   }
 
   async function load() {
     if (cloudEnabled()) {
       try {
-        if (cfg.type === "supabase") {
-          if (!/supabase\.co$/i.test(cfg.url)) throw new Error("非 supabase 地址");
-          const client = await ensureSupabase();
-          if (client) {
-            const { data, error } = await client.from("workbench_state").select("data").eq("id", ROW_ID).maybeSingle();
-            if (!error && data && data.data) return { state: data.data, src: "cloud" };
-          }
-        } else if (cfg.type === "github") {
-          const id = await ensureGist();
-          const g = await api("GET", API + "/gists/" + id, null, cfg.token);
-          const c = g.files && g.files[GIST_FILE] && g.files[GIST_FILE].content;
-          if (c) { const p = JSON.parse(c); if (p.data) return { state: p.data, src: "cloud" }; }
-        } else if (cfg.url) {
-          const r = await fetch(cfg.url.replace(/\/$/, "") + "/sync?k=" + encodeURIComponent(ROW_ID));
-          if (r.ok) { const j = await r.json(); if (j.data) return { state: j.data, src: "cloud" }; }
+        var remote = await readRemote();
+        lastSeenRemoteAt = remote.updated_at;
+        writeAllowed = true;              // 只有走到这里才解锁云端写入
+        if (remote.data) {
+          try { localStorage.setItem(LS_KEY, JSON.stringify(remote.data)); } catch (e) {}
+          return { state: remote.data, src: "cloud" };
         }
-      } catch (e) { console.warn("[Sync] 云端读取失败，回退本地：", e.message); }
+        // 云端可读但还没有数据 —— 允许把本地数据作为首份数据推上去
+        return { state: readLocal(), src: "cloud-empty" };
+      } catch (e) {
+        writeAllowed = false;
+        emit({ kind: "readonly", message: e.message });
+        return { state: readLocal(), src: "local-readonly", error: e.message };
+      }
     }
-    let st = null;
-    try { st = localStorage.getItem(LS_KEY) ? JSON.parse(localStorage.getItem(LS_KEY)) : null; } catch (e) {}
-    return { state: st, src: "local" };
+    return { state: readLocal(), src: "local" };
   }
+
+  /* ---------- 保存 ---------- */
 
   function save(state) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
-    if (!cloudEnabled()) return;
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+    catch (e) { emit({ kind: "local-full", message: "本地存储写入失败，可能空间已满" }); }
+    if (!canWriteCloud()) return;
+    pendingState = state;
+    if (pushTimer) clearTimeout(pushTimer);
+    pushTimer = setTimeout(function () { pushTimer = null; flush(); }, PUSH_DEBOUNCE);
+  }
+
+  async function writeRemote(state, now) {
     if (cfg.type === "supabase") {
-      ensureSupabase().then(client => {
-        if (!client) return;
-        client.from("workbench_state").upsert({ id: ROW_ID, data: state, updated_at: new Date().toISOString() }, { onConflict: "id" })
-          .then(({ error }) => { if (error) console.warn("[Sync] 云端推送失败：", error.message); });
-      }).catch(e => console.warn("[Sync] 推送异常：", e));
-    } else if (cfg.type === "github") {
-      ensureGist().then(id => api("PATCH", API + "/gists/" + id,
-        { files: { [GIST_FILE]: { content: JSON.stringify({ data: state, updated_at: new Date().toISOString() }) } } }, cfg.token))
-        .catch(e => console.warn("[Sync] Gist 推送失败：", e.message));
-    } else if (cfg.url) {
-      fetch(cfg.url.replace(/\/$/, "") + "/sync?k=" + encodeURIComponent(ROW_ID),
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) })
-        .catch(e => console.warn("[Sync] 推送失败：", e));
+      var client = await ensureSupabase();
+      var r = await client.from("workbench_state").upsert({ id: ROW_ID, data: state, updated_at: now }, { onConflict: "id" });
+      if (r.error) throw new Error(r.error.message);
+      return;
+    }
+    if (cfg.type === "github") {
+      var id = await ensureGist();
+      var files = {};
+      files[GIST_FILE] = { content: JSON.stringify({ data: state, updated_at: now }, null, 2) };
+      await api("PATCH", API + "/gists/" + id, { files: files }, cfg.token);
+      return;
+    }
+    var res = await fetch(cfg.url.replace(/\/$/, "") + "/sync?k=" + encodeURIComponent(ROW_ID), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: state, updated_at: now })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  }
+
+  async function flush() {
+    if (!canWriteCloud() || !pendingState) return;
+    var state = pendingState;
+    pendingState = null;
+    emit({ kind: "pushing" });
+    try {
+      // 冲突检测：推之前看一眼云端有没有被别的设备改过
+      var remote = await readRemote();
+      if (lastSeenRemoteAt && remote.updated_at && remote.updated_at !== lastSeenRemoteAt) {
+        writeAllowed = false;
+        emit({ kind: "conflict", remoteAt: remote.updated_at, localAt: lastSeenRemoteAt });
+        return;
+      }
+      var now = new Date().toISOString();
+      await writeRemote(state, now);
+      lastSeenRemoteAt = now;
+      emit({ kind: "pushed", at: now });
+    } catch (e) {
+      emit({ kind: "push-failed", message: e.message });
     }
   }
 
+  /* ---------- 手动操作 ---------- */
+
   async function pull() {
-    if (!cloudEnabled()) return null;
-    try {
-      if (cfg.type === "supabase") {
-        const client = await ensureSupabase();
-        if (client) {
-          const { data, error } = await client.from("workbench_state").select("data").eq("id", ROW_ID).maybeSingle();
-          if (!error && data && data.data) { try { localStorage.setItem(LS_KEY, JSON.stringify(data.data)); } catch (e) {} return data.data; }
-        }
-      } else if (cfg.type === "github") {
-        const id = await ensureGist();
-        const g = await api("GET", API + "/gists/" + id, null, cfg.token);
-        const c = g.files && g.files[GIST_FILE] && g.files[GIST_FILE].content;
-        if (c) { const p = JSON.parse(c); if (p.data) { try { localStorage.setItem(LS_KEY, JSON.stringify(p.data)); } catch (e) {} return p.data; } }
-      } else if (cfg.url) {
-        const r = await fetch(cfg.url.replace(/\/$/, "") + "/sync?k=" + encodeURIComponent(ROW_ID));
-        if (r.ok) { const j = await r.json(); if (j.data) { try { localStorage.setItem(LS_KEY, JSON.stringify(j.data)); } catch (e) {} return j.data; } }
-      }
-    } catch (e) { console.warn("[Sync] 拉取失败：", e.message); }
-    return null;
+    if (!cloudEnabled()) throw new Error("还没连接云端");
+    var remote = await readRemote();
+    lastSeenRemoteAt = remote.updated_at;
+    writeAllowed = true;
+    if (remote.data) { try { localStorage.setItem(LS_KEY, JSON.stringify(remote.data)); } catch (e) {} }
+    return remote.data;
   }
 
-  let sb = null;
-  async function ensureSupabase() {
-    if (sb) return sb;
-    try {
-      if (!window.supabase || !window.supabase.createClient) {
-        const m = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
-        window.supabase = { createClient: m.createClient };
-      }
-      sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } });
-      return sb;
-    } catch (e) { console.warn("[Sync] supabase 加载失败：", e); return null; }
+  // 冲突或只读之后，用户明确选择「以本设备为准」时才调用
+  async function forcePush(state) {
+    if (!cloudEnabled()) throw new Error("还没连接云端");
+    var now = new Date().toISOString();
+    await writeRemote(state, now);
+    lastSeenRemoteAt = now;
+    writeAllowed = true;
+    emit({ kind: "pushed", at: now, forced: true });
   }
 
-  // 给 UI 用：返回当前已确保的 Gist id（其它设备可据此确认同一份数据）
+  async function connect(newCfg, state) {
+    saveCfg(newCfg);
+    writeAllowed = false;
+    lastSeenRemoteAt = null;
+    var remote = await readRemote();       // 失败会抛出，由 UI 显示原因
+    lastSeenRemoteAt = remote.updated_at;
+    writeAllowed = true;
+    if (remote.data) return { mode: "adopted", state: remote.data };
+    await forcePush(state);
+    return { mode: "seeded", state: state };
+  }
+
   async function getGistId() {
     if (!cloudEnabled() || cfg.type !== "github") return null;
     return ensureGist();
   }
 
-  // 读取每日热点（独立文件，不干扰用户数据）。无 token / 离线时返回 null，由调用方回退本地快照。
-  async function loadHotspots() {
-    if (!cloudEnabled() || cfg.type !== "github" || !cfg.token) return null;
-    try {
-      const id = await ensureGist();
-      const g = await api("GET", API + "/gists/" + id, null, cfg.token);
-      const c = g.files && g.files[HOT_FILE] && g.files[HOT_FILE].content;
-      if (c) { const arr = JSON.parse(c); if (Array.isArray(arr)) return arr; }
-    } catch (e) { console.warn("[Sync] 热点读取失败，回退本地：", e.message); }
-    return null;
+  function status() {
+    return {
+      enabled: cloudEnabled(),
+      writable: canWriteCloud(),
+      type: cfg.type,
+      remember: !!cfg.remember,
+      gistId: cfg.gistId || null,
+      lastSeenRemoteAt: lastSeenRemoteAt
+    };
   }
 
-  // 写入每日热点（只更新 hotspots.json 一个文件，不动 state.json）
-  async function saveHotspots(arr) {
-    if (!cloudEnabled() || cfg.type !== "github" || !cfg.token) return false;
-    try {
-      const id = await ensureGist();
-      await api("PATCH", API + "/gists/" + id,
-        { files: { [HOT_FILE]: { content: JSON.stringify(arr, null, 2) } } }, cfg.token);
-      return true;
-    } catch (e) { console.warn("[Sync] 热点写入失败：", e.message); return false; }
-  }
+  // 关页面 / 切后台前，尽量把没推完的改动推出去
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && pendingState) {
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = null;
+      flush();
+    }
+  });
 
-  return { getCfg, saveCfg, cloudEnabled, load, save, pull, getGistId, loadHotspots, saveHotspots, GIST_DESC };
+  return {
+    LS_KEY: LS_KEY, GIST_DESC: GIST_DESC,
+    getCfg: getCfg, saveCfg: saveCfg, clearCreds: clearCreds,
+    cloudEnabled: cloudEnabled, canWriteCloud: canWriteCloud,
+    load: load, save: save, flush: flush, pull: pull, forcePush: forcePush,
+    connect: connect, getGistId: getGistId, status: status, on: on
+  };
 })();

@@ -3,11 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="AI工作台">
-<meta name="theme-color" content="#FF2442">
 <title>宏的AI陪跑 · 视频工作台</title>
+<meta name="description" content="小红书视频博主的运营工作台：选题流水线、脚本合规预检、数据复盘、商单变现。数据存在你自己的 GitHub Gist 里，不经过任何第三方服务器。">
+<meta name="theme-color" content="#FF2442" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131417" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="AI工作台">
+<meta name="mobile-web-app-capable" content="yes">
+<meta property="og:type" content="website">
+<meta property="og:title" content="宏的AI陪跑 · 视频工作台">
+<meta property="og:description" content="选题流水线、脚本合规预检、数据复盘、商单变现，一个页面跑完。">
+<meta property="og:locale" content="zh_CN">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
 <link rel="apple-touch-icon" href="assets/icon.svg">
@@ -15,230 +22,345 @@
 </head>
 <body>
 
-<header>
-  <div class="bar">
-    <div class="logo"><span class="dot"></span>宏的AI陪跑 <small>视频工作台</small></div>
-    <nav>
-      <button data-view="board" class="active">工作台</button>
-      <button data-view="hot">热点雷达</button>
-      <button data-view="review">复盘</button>
-      <button data-view="biz">商单</button>
-      <button data-view="rivals">对标博主</button>
+<a class="sr-only" href="#main">跳到主要内容</a>
+
+<header class="app-header">
+  <div class="hbar">
+    <div class="brand"><span class="brand-dot" aria-hidden="true"></span>宏的AI陪跑 <span class="brand-sub">视频工作台</span></div>
+    <nav class="tabs" role="tablist" aria-label="主导航">
+      <button class="tab" role="tab" data-view="board"  aria-selected="true"  aria-controls="view-board">工作台</button>
+      <button class="tab" role="tab" data-view="hot"    aria-selected="false" aria-controls="view-hot">热点库</button>
+      <button class="tab" role="tab" data-view="review" aria-selected="false" aria-controls="view-review">复盘</button>
+      <button class="tab" role="tab" data-view="biz"    aria-selected="false" aria-controls="view-biz">商单</button>
+      <button class="tab" role="tab" data-view="rivals" aria-selected="false" aria-controls="view-rivals">拆解库</button>
     </nav>
-    <div class="spacer"></div>
-    <div class="stat-strip">
-      <div class="s" id="st-fans"></div>
-      <div class="s" id="st-week"></div>
-      <div class="s" id="st-review"></div>
-      <div class="s" id="st-pipe"></div>
-      <div class="s" id="st-biz"></div>
+    <div class="hbar-right">
+      <button class="icon-btn" id="btn-theme" title="切换深色 / 浅色" aria-label="切换深色或浅色">◐</button>
+      <button class="sync-btn" id="btn-sync" aria-label="云端同步设置">本地</button>
     </div>
-    <button id="btn-sync" class="sync-btn" title="云端同步设置">☁ 本地</button>
   </div>
+  <div id="banners"></div>
 </header>
 
-<main>
-  <!-- ========== 工作台（主视图） ========== -->
-  <section class="view active" id="view-board">
-    <div class="dash">
-      <div class="card focus">
-        <h3>今日聚焦</h3>
-        <ul id="focus-list"></ul>
+<main class="wrap" id="main">
+
+  <!-- 状态条：旧版三张仪表卡压成一行 -->
+  <div class="statusbar" id="statusbar">
+    <div class="sb-focus" id="sb-focus"></div>
+    <div class="sb-metrics" id="sb-metrics"></div>
+  </div>
+
+  <!-- ============ 工作台 ============ -->
+  <section class="view" id="view-board" role="tabpanel" aria-label="工作台">
+    <div class="board-tools">
+      <div class="seg" role="group" aria-label="视图切换">
+        <button id="mode-board" aria-pressed="true">看板</button>
+        <button id="mode-cal" aria-pressed="false">日历</button>
       </div>
-      <div class="card kpi">
-        <div class="lab">粉丝进度（前期核心 KPI）</div>
-        <div class="num" id="kpi-fans">0</div>
-        <div class="bar" id="fans-bar"><i style="width:0%"></i></div>
-        <div class="sub" id="kpi-fans-sub">目标 5000 粉 · 开蒲公英接商单</div>
+      <div class="search" id="wrap-search">
+        <span class="mag" aria-hidden="true">⌕</span>
+        <input class="inp" id="q" type="search" placeholder="搜标题 / 钩子 / 标签" aria-label="搜索选题">
       </div>
-      <div class="card kpi">
-        <div class="lab">本周发布节奏</div>
-        <div class="num" id="kpi-week">0<span class="sub-num"> / 3 条</span></div>
-        <div class="week-bars" id="week-bars"></div>
-        <div class="sub" id="kpi-week-sub">近 7 天发布分布 · 目标每周 3 条稳定输出</div>
-      </div>
+      <div class="filters" id="tag-filters"></div>
+      <button class="btn btn-primary" id="btn-new" style="margin-left:auto">新建选题</button>
     </div>
 
-    <div class="board-head">
-      <div>
-        <h2 style="display:inline">视频生产流水线</h2>
-        <span class="hint">　拖拽卡片推进阶段 · 点卡片编辑</span>
-      </div>
-      <button class="btn" id="btn-new">+ 新建选题</button>
+    <div id="pane-board">
+      <div class="stage-tabs" id="stage-tabs" role="tablist" aria-label="阶段切换"></div>
+      <div class="board" id="board"></div>
     </div>
-    <div class="board" id="board"></div>
+
+    <div id="pane-cal" hidden>
+      <div class="cal-bar">
+        <button class="btn btn-sm" id="cal-prev" aria-label="上个月">←</button>
+        <div class="m" id="cal-month"></div>
+        <button class="btn btn-sm" id="cal-next" aria-label="下个月">→</button>
+        <button class="btn btn-sm" id="cal-today">回到本月</button>
+        <span class="stamp">绿色＝已发布 · 黄色＝计划发布</span>
+      </div>
+      <div class="cal">
+        <div class="cal-head"><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div></div>
+        <div class="cal-grid" id="cal-grid"></div>
+      </div>
+    </div>
   </section>
 
-  <!-- ========== 热点雷达 ========== -->
-  <section class="view" id="view-hot">
-    <h2 class="section-title">热点雷达 <span id="hot-src" class="hot-src" hidden></span></h2>
-    <p class="section-sub">每天 9:00 自动抓取抖音 / 小红书 AI 爆款 · 一键变成你的二创选题（品牌名模糊化，方法论留给你）。</p>
-    <div class="grid hot-grid" id="hot-grid"></div>
+  <!-- ============ 热点库 ============ -->
+  <section class="view" id="view-hot" role="tabpanel" hidden>
+    <h2 class="sec-title">热点库</h2>
+    <p class="sec-sub">
+      抖音和小红书都没有公开 API，站外抓取会被风控 —— 所以这里不做也不假装做自动抓取。
+      这是你自己的选题库：刷到好东西随手记一条，需要时一键变成选题。手记的比爬来的准。
+    </p>
+    <div style="margin-bottom:14px"><button class="btn btn-primary" id="btn-new-hot">记一条热点</button></div>
+    <div class="grid grid-3" id="hot-grid"></div>
   </section>
 
-  <!-- ========== 复盘 ========== -->
-  <section class="view" id="view-review">
-    <h2 class="section-title">发帖复盘</h2>
-    <p class="section-sub">视频博主看这 4 个数：2秒留存（钩子）、完播率（节奏）、赞藏（价值）、转粉率（人设）。</p>
-    <div class="review-wrap">
-      <form class="form" id="rv-form">
-        <label>选择视频
-          <select id="rv-idea"></select>
-        </label>
-        <div class="script-recall" id="rv-script"></div>
-        <label>播放量<input id="rv-play" type="number" placeholder="如 12000" required></label>
-        <div style="display:flex;gap:10px">
-          <label style="flex:1">2秒留存率(%)<input id="rv-ret2" type="number" placeholder="如 45"></label>
-          <label style="flex:1">完播率(%)<input id="rv-finish" type="number" placeholder="如 18"></label>
+  <!-- ============ 复盘 ============ -->
+  <section class="view" id="view-review" role="tabpanel" hidden>
+    <h2 class="sec-title">发帖复盘</h2>
+    <p class="sec-sub">
+      视频看四个数：2 秒留存看钩子、完播率看节奏、赞藏看价值、转粉率看人设。
+      同一条视频可以隔几天再记一次 —— 首日冲和慢热是两种完全不同的爆款，值得分开对待。
+    </p>
+    <div class="review-layout">
+      <form class="review-form" id="rv-form">
+        <div class="fld">
+          <label for="rv-idea">选择视频</label>
+          <select id="rv-idea" required></select>
         </div>
-        <div style="display:flex;gap:10px">
-          <label style="flex:1">赞<input id="rv-like" type="number" placeholder="0"></label>
-          <label style="flex:1">藏<input id="rv-save" type="number" placeholder="0"></label>
+        <div id="rv-recall"></div>
+        <div class="fld">
+          <label for="rv-at">数据采集时间 <span class="fld-hint">发布几天后记的</span></label>
+          <input id="rv-at" type="date" required>
         </div>
-        <div style="display:flex;gap:10px">
-          <label style="flex:1">评<input id="rv-comment" type="number" placeholder="0"></label>
-          <label style="flex:1">涨粉<input id="rv-follow" type="number" placeholder="0"></label>
+        <div class="fld"><label for="rv-play">播放量</label><input id="rv-play" class="inp" type="number" min="0" placeholder="如 12000" required></div>
+        <div class="fld-row">
+          <div class="fld"><label for="rv-ret2">2 秒留存 %</label><input id="rv-ret2" class="inp" type="number" min="0" max="100" step="0.1" placeholder="45"></div>
+          <div class="fld"><label for="rv-finish">完播率 %</label><input id="rv-finish" class="inp" type="number" min="0" max="100" step="0.1" placeholder="18"></div>
         </div>
-        <button class="btn" type="submit">保存并诊断</button>
+        <div class="fld-row">
+          <div class="fld"><label for="rv-like">赞</label><input id="rv-like" class="inp" type="number" min="0" placeholder="0"></div>
+          <div class="fld"><label for="rv-save">藏</label><input id="rv-save" class="inp" type="number" min="0" placeholder="0"></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld"><label for="rv-comment">评</label><input id="rv-comment" class="inp" type="number" min="0" placeholder="0"></div>
+          <div class="fld"><label for="rv-follow">涨粉</label><input id="rv-follow" class="inp" type="number" min="0" placeholder="0"></div>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%">保存并诊断</button>
       </form>
       <div>
-        <div class="review-list" id="review-list"></div>
-        <div id="ret-chart"></div>
+        <div id="insights"></div>
+        <div id="review-list"></div>
       </div>
     </div>
   </section>
 
-  <!-- ========== 商单变现 ========== -->
-  <section class="view" id="view-biz">
-    <h2 class="section-title">商单变现</h2>
-    <p class="section-sub">前期涨粉的出口。追踪蒲公英门槛、接单准备度、最佳作品集与报价参考——把运营工具变成生意工具。</p>
+  <!-- ============ 商单 ============ -->
+  <section class="view" id="view-biz" role="tabpanel" hidden>
+    <h2 class="sec-title">商单变现</h2>
+    <p class="sec-sub">涨粉的出口。门槛、接单准备度、最佳作品集、报价参考——把运营工具变成生意工具。</p>
     <div class="biz-grid">
-      <div class="card biz-card biz-fans">
-        <div class="biz-h">粉丝 &amp; 蒲公英门槛</div>
+      <div class="card">
+        <h3>粉丝进度</h3>
         <div class="fans-row">
-          <div class="fans-now"><b id="biz-fans-now">0</b><span>当前粉丝</span></div>
+          <div>
+            <div class="big" id="fans-now">0</div>
+            <div class="sub" id="fans-speed">还没有历史数据</div>
+          </div>
           <div class="fans-edit">
-            <input id="biz-fans-input" type="number" placeholder="更新粉丝数">
-            <button class="btn ghost" id="biz-fans-save">更新</button>
+            <input class="inp" id="fans-input" type="number" min="0" placeholder="当前粉丝" aria-label="更新粉丝数">
+            <button class="btn btn-sm" id="fans-save">记录</button>
           </div>
         </div>
-        <div class="prog"><i id="biz-prog-i"></i></div>
-        <div class="biz-sub" id="biz-pgy">蒲公英入驻门槛 1000 粉</div>
+        <div class="prog-l"><i id="fans-prog"></i></div>
+        <div class="sub" id="fans-note" style="margin-top:9px"></div>
+        <div class="bars" id="fans-history" style="margin-top:12px"></div>
       </div>
 
-      <div class="card biz-card biz-ready">
-        <div class="biz-h">接单准备度</div>
-        <ul class="ready" id="biz-ready"></ul>
+      <div class="card">
+        <h3>接单准备度</h3>
+        <ul class="ready" id="ready-list"></ul>
       </div>
 
-      <div class="card biz-card biz-port">
-        <div class="biz-h">最佳作品集 <small>自动按转粉率排序</small></div>
-        <div id="biz-port"></div>
+      <div class="card">
+        <h3>最佳作品集 <span class="fld-hint">按转粉率排序</span></h3>
+        <div id="portfolio"></div>
       </div>
 
-      <div class="card biz-card biz-rate">
-        <div class="biz-h">AI 赛道报价参考</div>
-        <table class="rate" id="biz-rate"></table>
-        <div class="biz-note">AI / 科技赛道通常溢价 30–50%，仅供参考</div>
+      <div class="card">
+        <h3>报价参考</h3>
+        <table class="rate" id="rate-table"></table>
+        <div class="sub" id="rate-note" style="margin-top:10px"></div>
       </div>
 
-      <div class="card biz-card biz-deals">
-        <div class="biz-h">商单记录</div>
+      <div class="card wide">
+        <h3>商单记录</h3>
         <div class="deal-form">
-          <input id="biz-brand" placeholder="品牌">
-          <input id="biz-amount" placeholder="金额 ¥">
-          <select id="biz-status"><option>洽谈中</option><option>已签约</option><option>已结款</option></select>
-          <button class="btn" id="biz-deal-add">添加</button>
+          <input class="inp" id="deal-brand" placeholder="品牌" aria-label="品牌">
+          <input class="inp" id="deal-amount" placeholder="金额 ¥" aria-label="金额">
+          <select class="inp" id="deal-status" aria-label="状态"></select>
+          <button class="btn btn-primary" id="deal-add">添加</button>
         </div>
-        <div id="biz-deals"></div>
+        <div id="deal-list"></div>
       </div>
     </div>
   </section>
 
-  <!-- ========== 对标博主 ========== -->
-  <section class="view" id="view-rivals">
-    <h2 class="section-title">对标博主</h2>
-    <p class="section-sub">站外视频无法直接内嵌，做成拆解卡 + 一键跳转。学他们的「钩子 / 节奏 / 栏目化」，不抄内容抄打法。</p>
-    <div class="grid rival-grid" id="rival-grid"></div>
+  <!-- ============ 拆解库 ============ -->
+  <section class="view" id="view-rivals" role="tabpanel" hidden>
+    <h2 class="sec-title">爆款拆解库</h2>
+    <p class="sec-sub">
+      不抄内容，抄打法。每看到一条好视频就记一次钩子和节奏，攒够之后
+      「哪类钩子对我的赛道最有效」这个问题就有答案了。
+    </p>
+    <div style="margin-bottom:14px"><button class="btn btn-primary" id="btn-new-rival">记一条拆解</button></div>
+    <div class="grid grid-2" id="rival-grid"></div>
   </section>
+
 </main>
 
-<!-- ========== 新建 / 编辑 弹窗 ========== -->
-<div class="modal-bg" id="modal">
+<div class="footnote">
+  <span id="foot-version"></span>
+  <span id="foot-storage"></span>
+  <button class="btn btn-sm" id="btn-settings">数据与备份</button>
+</div>
+
+<!-- ============ 选题弹窗 ============ -->
+<div class="modal-bg" id="modal-idea" role="dialog" aria-modal="true" aria-labelledby="idea-title">
   <div class="modal">
-    <h3>视频选题</h3>
-    <div class="fld"><label>标题（工作标题）</label><input id="m-title" placeholder="如：我用AI把3小时PPT压到3分钟"></div>
-    <div class="fld"><label>前3秒钩子（视频命门 · 即开场）</label><input id="m-hook" placeholder="如：以前做PPT熬到凌晨，现在喝杯咖啡就搞定"></div>
-    <div class="script-block">
-      <div class="sb-head"><b>完整脚本</b><span class="sb-sub">开场钩子即上方，下面补 3 块 · 自动合规预检</span></div>
-      <div class="fld"><label>痛点共鸣（为什么看下去）</label><textarea id="m-pain" placeholder="如：你是不是也每次做PPT都熬到半夜、改到崩溃……"></textarea></div>
-      <div class="fld"><label>实操步骤（分点写，口播感）</label><textarea id="m-steps" placeholder="如：① 打开XX ② 输入这句提示词 ③ 一键出稿……"></textarea></div>
-      <div class="fld"><label>收尾关注引导</label><textarea id="m-end" placeholder="如：关注我，下期拆解海外博主私藏的AI玩法"></textarea></div>
-      <div class="compliance" id="m-comp"></div>
+    <div class="modal-head">
+      <h3 id="idea-title">视频选题</h3>
+      <button class="x" data-close aria-label="关闭">✕</button>
     </div>
-    <div class="fld"><label>封面概念</label><input id="m-cover" placeholder="如：熬夜黑眼圈 vs 咖啡+成品"></div>
-    <div style="display:flex;gap:10px">
-      <div class="fld" style="flex:1"><label>标签</label><input id="m-tag" placeholder="AI实操 / AI小白 / 陪跑"></div>
-      <div class="fld" style="flex:1"><label>预计发布</label><input id="m-due" type="date"></div>
-    </div>
-    <div class="fld"><label>阶段</label>
-      <select id="m-stage">
-        <option value="pool">灵感池</option>
-        <option value="script">写脚本</option>
-        <option value="shoot">拍摄</option>
-        <option value="edit">剪辑</option>
-        <option value="published">已发布</option>
-        <option value="review">复盘</option>
-      </select>
-    </div>
-    <div class="fld"><label>发布平台</label>
-      <div class="pf-pick" id="m-pf">
-        <label><input type="checkbox" value="xhs" checked>小红书</label>
-        <label><input type="checkbox" value="dy">抖音</label>
+    <div class="modal-body">
+      <div class="fld"><label for="m-title">标题（工作标题）</label><input class="inp" id="m-title" placeholder="如：我用AI把3小时PPT压到3分钟"></div>
+
+      <div class="block">
+        <div class="block-h">完整脚本 <span>开场钩子是视频命门，先写它 · 下面边写边做合规预检</span></div>
+        <div class="fld"><label for="m-hook">前 3 秒钩子</label><input class="inp" id="m-hook" placeholder="如：以前做PPT熬到凌晨，现在喝杯咖啡就搞定"></div>
+        <div class="fld">
+          <label for="m-hooktype">钩子类型 <span class="fld-hint">攒够 5 条就能算出哪类对你最有效</span></label>
+          <select class="inp" id="m-hooktype"></select>
+        </div>
+        <div class="fld"><label for="m-pain">痛点共鸣（为什么看下去）</label><textarea id="m-pain" placeholder="你是不是也每次做PPT都熬到半夜、改到崩溃……"></textarea></div>
+        <div class="fld"><label for="m-steps">实操步骤（分点写，口播感）</label><textarea id="m-steps" placeholder="① 打开XX ② 输入这句提示词 ③ 一键出稿……"></textarea></div>
+        <div class="fld"><label for="m-end">收尾关注引导</label><textarea id="m-end" placeholder="关注我，下期拆解海外博主私藏的AI玩法"></textarea></div>
+        <div class="compliance" id="m-comp" hidden></div>
       </div>
+
+      <div class="fld"><label for="m-cover">封面概念</label><input class="inp" id="m-cover" placeholder="如：熬夜黑眼圈 vs 咖啡+成品"></div>
+      <div class="fld-row">
+        <div class="fld"><label for="m-tags">标签 <span class="fld-hint">逗号分隔</span></label><input class="inp" id="m-tags" placeholder="AI实操, 陪跑"></div>
+        <div class="fld"><label for="m-due">计划发布</label><input class="inp" id="m-due" type="date"></div>
+      </div>
+      <div class="fld-row">
+        <div class="fld"><label for="m-stage">阶段</label><select class="inp" id="m-stage"></select></div>
+        <div class="fld" id="wrap-substage"><label for="m-substage">细分</label><select class="inp" id="m-substage"></select></div>
+      </div>
+      <div class="fld" id="wrap-published">
+        <label for="m-pubat">实际发布时间 <span class="fld-hint">带小时，用来算「什么时段发效果最好」</span></label>
+        <input class="inp" id="m-pubat" type="datetime-local">
+      </div>
+      <div class="fld"><span class="fld-label">发布平台</span><div class="picks" id="m-platform"></div></div>
+
+      <div class="block">
+        <div class="block-h">素材与成片 <span>把工作台和真东西连起来，复盘时不用再去 App 里翻</span></div>
+        <div class="fld"><label for="m-link-material">素材 / 工程链接</label><input class="inp" id="m-link-material" placeholder="网盘、剪辑工程…"></div>
+        <div class="fld" style="margin-bottom:0"><label for="m-link-post">成片 / 笔记链接</label><input class="inp" id="m-link-post" placeholder="发布后的作品链接"></div>
+      </div>
+
+      <div class="fld" style="margin-bottom:0"><label for="m-note">备注</label><textarea id="m-note" placeholder="想到什么随手记"></textarea></div>
     </div>
-    <div class="modal-acts">
-      <button class="btn ghost" id="m-del" style="display:none;color:#FF2442;border-color:#FFD2DA">删除</button>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="m-del" hidden>删除</button>
+      <button class="btn" id="m-clone" hidden>复制一条</button>
       <div class="right">
-        <button class="btn ghost" id="m-cancel">取消</button>
-        <button class="btn" id="m-save">保存</button>
+        <button class="btn" data-close>取消</button>
+        <button class="btn btn-primary" id="m-save">保存</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ========== 云端同步设置 弹窗 ========== -->
-<div class="modal-bg" id="sync-modal">
-  <div class="modal sync-modal">
-    <h3>云端同步设置</h3>
-    <p class="sync-tip">数据存到你的 <b>GitHub Gist</b>：永久免费、不依赖电脑开机、电脑 / iPhone / iPad 三端实时同步。只需一个带 <code>gist</code> 权限的 GitHub 个人访问令牌（PAT），10 秒建好。其它设备用同一个令牌会自动找到这份数据，不用抄 ID。</p>
-    <div class="fld"><label>GitHub 令牌 (PAT)</label><input id="sync-token" type="password" placeholder="github_pat_xxx 或 ghp_xxx（需 gist 权限）" autocomplete="off"></div>
-    <div class="fld" id="gist-row" style="display:none"><label>同步 ID（其它设备自动查找，一般无需手动填）</label><input id="sync-gist" readonly></div>
-    <div class="sync-status off" id="sync-status">状态：未连接（仅本地保存）</div>
-    <details class="sync-adv">
-      <summary>高级：改用 Supabase</summary>
-      <div class="fld"><label>Supabase Project URL</label><input id="sync-url" placeholder="https://xxxx.supabase.co"></div>
-      <div class="fld"><label>Anon / Public Key</label><input id="sync-key" placeholder="eyJ...（以 eyJ 开头）"></div>
-    </details>
-    <div class="modal-acts">
-      <div class="left">
-        <button class="btn ghost" id="sync-export">导出备份</button>
-        <button class="btn ghost" id="sync-import-btn">导入备份</button>
-        <input type="file" id="sync-import" accept="application/json" style="display:none">
-      </div>
+<!-- ============ 通用弹窗（热点 / 拆解） ============ -->
+<div class="modal-bg" id="modal-generic" role="dialog" aria-modal="true" aria-labelledby="gen-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="gen-title"></h3>
+      <button class="x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="gen-body"></div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="gen-del" hidden>删除</button>
       <div class="right">
-        <button class="btn ghost" id="sync-pull">从云端拉取</button>
-        <button class="btn ghost" id="sync-cancel">取消</button>
-        <button class="btn" id="sync-save">保存并连接</button>
+        <button class="btn" data-close>取消</button>
+        <button class="btn btn-primary" id="gen-save">保存</button>
       </div>
     </div>
   </div>
 </div>
 
+<!-- ============ 同步 / 数据设置 ============ -->
+<div class="modal-bg" id="modal-sync" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="sync-title">数据与同步</h3>
+      <button class="x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="status-line" id="sync-status">状态：仅本地保存</div>
+
+      <div class="tip-box">
+        数据存到你自己的 <b>GitHub Gist</b>（私密）：免费、不依赖电脑开机、多设备同步。
+        需要一个带 <code>gist</code> 权限的个人访问令牌。其它设备填同一个令牌会自动找到这份数据。
+      </div>
+      <div class="tip-box danger">
+        令牌是账号级凭证，任何拿到它的人都能读写你的全部 Gist。
+        建议用 fine-grained token 且只勾 gist 权限；共用电脑上请选下面的「只记住本次会话」。
+      </div>
+
+      <div class="fld">
+        <label for="sync-token">GitHub 令牌</label>
+        <input class="inp" id="sync-token" type="password" placeholder="github_pat_… 或 ghp_…" autocomplete="off" spellcheck="false">
+      </div>
+      <label class="switch"><input type="checkbox" id="sync-remember" checked>记住令牌（不勾则关掉浏览器就失效）</label>
+      <div class="fld" id="wrap-gist" hidden>
+        <label for="sync-gist">同步 ID <span class="fld-hint">自动查找，一般不用管</span></label>
+        <input class="inp" id="sync-gist" readonly>
+      </div>
+
+      <details class="adv">
+        <summary>高级：改用 Supabase</summary>
+        <div class="fld" style="margin-top:8px"><label for="sync-url">Project URL</label><input class="inp" id="sync-url" placeholder="https://xxxx.supabase.co"></div>
+        <div class="fld"><label for="sync-key">Anon / Public Key</label><input class="inp" id="sync-key" placeholder="eyJ…"></div>
+      </details>
+
+      <div class="block">
+        <div class="block-h">备份与数据</div>
+        <div class="picks" style="gap:8px">
+          <button class="btn btn-sm" id="btn-export">导出备份</button>
+          <button class="btn btn-sm" id="btn-import">导入备份</button>
+          <button class="btn btn-sm" id="btn-pull">从云端拉取</button>
+          <button class="btn btn-sm btn-danger" id="btn-clear-creds">清除令牌</button>
+          <button class="btn btn-sm btn-danger" id="btn-reset">清空全部数据</button>
+        </div>
+        <input type="file" id="import-file" accept="application/json" hidden>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <div class="right">
+        <button class="btn" data-close>关闭</button>
+        <button class="btn btn-primary" id="sync-connect">保存并连接</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 首次使用 ============ -->
+<div class="modal-bg" id="modal-first" role="dialog" aria-modal="true" aria-labelledby="first-title">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head"><h3 id="first-title">先从哪开始？</h3></div>
+    <div class="modal-body">
+      <p style="font-size:var(--fs-m);line-height:1.7;color:var(--ink-2)">
+        示例数据能让你先看清每个模块长什么样，但它会计入统计。
+        打算认真用的话，建议直接从空白开始 —— 示例随时可以在「数据与备份」里加载。
+      </p>
+    </div>
+    <div class="modal-foot">
+      <div class="right">
+        <button class="btn" id="first-demo">加载示例看看</button>
+        <button class="btn btn-primary" id="first-blank">从空白开始</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script src="assets/config.js"></script>
 <script src="assets/data.js"></script>
-<script src="data/hotspots.js"></script>
 <script src="assets/sync.js"></script>
 <script src="assets/app.js"></script>
-<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW',e)));}</script>
 </body>
 </html>
