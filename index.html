@@ -354,8 +354,24 @@
       </details>
 
       <div class="block">
-        <div class="block-h">多设备 <span>手机 / iPad 扫一下就好，不用再申请一次令牌</span></div>
-        <button class="btn btn-sm" id="btn-pair" type="button">添加另一台设备</button>
+        <div class="block-h">多设备 <span>不用在每台设备上重新申请令牌</span></div>
+
+        <div class="tip-box" style="margin-bottom:12px">
+          <b>iPhone / iPad 注意：</b>主屏幕上的图标和 Safari 是<b>两套独立存储</b>，
+          苹果不让它们互通，所以要各连一次。
+          建议装好图标后就只从图标进，别再用 Safari 开 —— 否则同一台设备上会存两份数据。
+        </div>
+
+        <button class="btn btn-sm" id="btn-pair" type="button">生成配对码</button>
+
+        <div class="fld" style="margin-top:14px">
+          <label for="pair-in">从另一台设备粘贴配对码 <span class="fld-hint">扫不了码时用这个，比如主屏幕图标里</span></label>
+          <input class="inp" id="pair-in" placeholder="长按粘贴，然后点右边连接" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="picks" style="gap:8px;margin-bottom:4px">
+          <button class="btn btn-sm btn-primary" id="btn-pair-apply" type="button">用这个配对码连接</button>
+          <button class="btn btn-sm" id="btn-pair-read" type="button">读剪贴板</button>
+        </div>
         <div id="pair-panel" hidden style="margin-top:12px">
           <div class="tip-box danger">
             这个二维码等同于你的令牌 —— 当面扫，别截图发给任何人。10 分钟后自动失效。

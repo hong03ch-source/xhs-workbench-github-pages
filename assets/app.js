@@ -1684,11 +1684,58 @@
     if (!panel) return;
     panel.hidden = true;
     $("#pair-link").value = "";     // 别把令牌留在 DOM 里
+    var pin = $("#pair-in"); if (pin) pin.value = "";
     var c = $("#pair-qr");
     if (c && c.getContext) c.getContext("2d").clearRect(0, 0, c.width, c.height);
   }
 
-  // 启动最早期调用：必须在 Sync.load() 之前把凭证就位
+  // 把配对码还原成一份同步配置；出问题就抛出中文原因
+  function decodePair(code) {
+    var p;
+    try { p = JSON.parse(b64urlDecode(code)); }
+    catch (e) { throw new Error("配对码读不出来，请在另一台设备上重新生成一个"); }
+
+    if (p.exp && Date.now() > p.exp) throw new Error("配对码已过期（超过 10 分钟），请重新生成一个");
+
+    var cfg = { remember: true, type: p.ty === "supabase" ? "supabase" : "github" };
+    if (cfg.type === "supabase") { cfg.url = p.u; cfg.key = p.k; }
+    else { cfg.token = p.t; if (p.g) cfg.gistId = p.g; }
+
+    if (!(cfg.token || (cfg.url && cfg.key))) throw new Error("配对码不完整，请重新生成");
+    return cfg;
+  }
+
+  // 从一段文本里把配对码抠出来：整条链接、或者光秃秃的码，都认
+  function extractPairCode(text) {
+    text = String(text || "").trim();
+    var m = text.match(/pair=([A-Za-z0-9\-_]+)/);
+    if (m) return m[1];
+    if (/^[A-Za-z0-9\-_]{24,}$/.test(text)) return text;
+    return null;
+  }
+
+  /*
+   * 用配对码连接。
+   *
+   * 为什么需要这条路：iOS 上主屏幕图标和 Safari 是两套完全独立的存储
+   * （cookie / localStorage / Service Worker 都不共享），所以在 Safari 里
+   * 配好的令牌，PWA 里看不到。而扫码只会在 Safari 里打开，进不了 PWA。
+   * 剪贴板是跨 App 通的，所以走「复制配对码 → 在 PWA 里粘贴」。
+   */
+  function applyPairCode(text) {
+    var code = extractPairCode(text);
+    if (!code) {
+      toast("这不像是配对码。在另一台设备上点「生成配对码」再点「复制链接」，然后粘过来", { tone: "bad", timeout: 12000 });
+      return;
+    }
+    var cfg;
+    try { cfg = decodePair(code); }
+    catch (e) { toast(e.message, { tone: "bad", timeout: 12000 }); return; }
+    $("#pair-in").value = "";
+    runConnect(cfg);
+  }
+
+  // 启动最早期调用：必须在读云端之前把凭证就位
   function consumePairing() {
     var m = location.hash.match(/[#&]pair=([A-Za-z0-9\-_]+)/);
     if (!m) return false;
@@ -1697,45 +1744,25 @@
     try { history.replaceState(null, "", location.pathname + location.search); }
     catch (e) { location.hash = ""; }
 
-    var p;
-    try { p = JSON.parse(b64urlDecode(m[1])); }
-    catch (e) { toast("配对码读不出来，请在另一台设备上重新生成", { tone: "bad", timeout: 12000 }); return false; }
+    var cfg;
+    try { cfg = decodePair(m[1]); }
+    catch (e) { toast(e.message, { tone: "bad", timeout: 12000 }); return false; }
 
-    if (p.exp && Date.now() > p.exp) {
-      toast("配对码已过期（超过 10 分钟），请重新生成一个", { tone: "bad", timeout: 12000 });
-      return false;
-    }
-    var cfg = { remember: true, type: p.ty === "supabase" ? "supabase" : "github" };
-    if (cfg.type === "supabase") { cfg.url = p.u; cfg.key = p.k; }
-    else { cfg.token = p.t; if (p.g) cfg.gistId = p.g; }
-
-    if (!(cfg.token || (cfg.url && cfg.key))) {
-      toast("配对码不完整，请重新生成", { tone: "bad" });
-      return false;
-    }
     Sync.saveCfg(cfg);
     return true;
   }
 
-  function doConnect() {
-    var token = $("#sync-token").value.trim();
-    var url = $("#sync-url").value.trim();
-    var key = $("#sync-key").value.trim();
-    var remember = $("#sync-remember").checked;
-    var cfg;
-    if (url && key) cfg = { type: "supabase", url: url, key: key, remember: remember };
-    else if (token) cfg = { type: "github", token: token, gistId: $("#sync-gist").value.trim() || undefined, remember: remember };
-    else { toast("填一个 GitHub 令牌，或展开高级填 Supabase", { tone: "bad" }); return; }
-
+  function runConnect(cfg) {
     var line = $("#sync-status");
     line.className = "status-line";
     line.textContent = "状态：正在连接…";
-    Sync.connect(cfg, state).then(function (res) {
+    return Sync.connect(cfg, state).then(function (res) {
       if (res.mode === "adopted") {
         state = normalize(res.state);
-        toast("云端已有数据，已切换成云端那份");
+        dirty = false;
+        toast("连上了，已切换成云端那份数据");
       } else {
-        toast("已把本机数据作为首份数据推上云端");
+        toast("连上了，本机数据已作为第一份推上云端");
       }
       refresh();
       updateSyncButton();
@@ -1747,7 +1774,26 @@
     }).catch(function (e) {
       line.className = "status-line bad";
       line.textContent = "状态：连接失败 — " + e.message;
+      toast("连接失败：" + e.message, { tone: "bad", timeout: 12000 });
     });
+  }
+
+  function doConnect() {
+    var token = $("#sync-token").value.trim();
+    var url = $("#sync-url").value.trim();
+    var key = $("#sync-key").value.trim();
+    var remember = $("#sync-remember").checked;
+
+    // 有人会把配对链接直接贴进令牌框，认一下，省得他们再找一遍
+    var asPair = extractPairCode(token);
+    if (asPair && token.indexOf("pair=") >= 0) { applyPairCode(token); return; }
+
+    var cfg;
+    if (url && key) cfg = { type: "supabase", url: url, key: key, remember: remember };
+    else if (token) cfg = { type: "github", token: token, gistId: $("#sync-gist").value.trim() || undefined, remember: remember };
+    else { toast("填一个 GitHub 令牌，或者用下面的配对码", { tone: "bad" }); return; }
+
+    runConnect(cfg);
   }
 
   function doPull() {
@@ -1957,6 +2003,28 @@
 
     $("#btn-pair").onclick = showPairing;
     $("#btn-pair-hide").onclick = hidePairing;
+    $("#btn-pair-apply").onclick = function () { applyPairCode($("#pair-in").value); };
+    $("#pair-in").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); applyPairCode($("#pair-in").value); }
+    });
+    $("#btn-pair-read").onclick = function () {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        $("#pair-in").focus();
+        toast("这个浏览器不给读剪贴板，请在上面的框里长按粘贴", { tone: "bad", timeout: 8000 });
+        return;
+      }
+      navigator.clipboard.readText().then(
+        function (t) {
+          if (!t) { toast("剪贴板是空的", { tone: "bad" }); return; }
+          $("#pair-in").value = t.trim();
+          applyPairCode(t);
+        },
+        function () {
+          $("#pair-in").focus();
+          toast("读不到剪贴板（可能被拒绝了），请在上面的框里长按粘贴", { tone: "bad", timeout: 8000 });
+        }
+      );
+    };
     $("#btn-pair-copy").onclick = function () {
       var v = $("#pair-link").value;
       if (!v) return;

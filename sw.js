@@ -10,7 +10,7 @@
  *   图标 / manifest  → stale-while-revalidate，先给缓存再后台更新
  * 并且发现新版本时通知页面，由页面弹一个「有新版本，点击刷新」。
  */
-var VERSION = "2026-07-29-2";
+var VERSION = "2026-07-29-3";
 var CACHE = "xhs-wb-" + VERSION;
 var SHELL = [
   "./", "index.html", "manifest.webmanifest",
